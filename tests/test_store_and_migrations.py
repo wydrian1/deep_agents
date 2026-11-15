@@ -11,14 +11,6 @@ from deep_agents_app.runs.store import Busy, EventLimit, RunStore, now
 from .conftest import make_settings
 
 
-@pytest.fixture
-def store(settings):
-    engine = make_engine(settings)
-    migrate(settings, engine)
-    yield RunStore(engine, settings)
-    engine.dispose()
-
-
 def reserve(store, **kw):
     return store.reserve_run(prompt="p", model="m", mode="test", language="en", tools=[], files=[], **kw)
 

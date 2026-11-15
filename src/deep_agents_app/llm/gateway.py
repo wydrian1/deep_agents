@@ -47,6 +47,7 @@ def build_model(settings: Settings, model: str, run_id: str) -> BaseChatModel:
         api_key=settings.llm_api_key,
         timeout=settings.llm_timeout_seconds,
         max_retries=settings.llm_max_retries,
+        stream_usage=True,  # token counts for streamed calls (LiteLLM supports stream_options)
         extra_body=extra_body,
         model_kwargs=params,
     )

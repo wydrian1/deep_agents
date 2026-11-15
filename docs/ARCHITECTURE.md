@@ -10,10 +10,10 @@ not a hardened product.
 client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, run_events, audit, files, artifacts)
                     │                    ▲
                     ▼                    │ events / state / cancel polling
-              RunExecutor (thread pool, ≤ MAX_CONCURRENT_RUNS)
-                    │
+              Supervisor (≤ MAX_CONCURRENT_RUNS, kills on cancel/timeout)
+                    │ one process per run
                     ▼
-        Deep Agent (agents/runner.py) ──▶ LiteLLM gateway (llm/gateway.py)
+        worker → Deep Agent (agents/runner.py) ──▶ LiteLLM gateway (llm/gateway.py)
                     │                  └▶ tools/ (web, github, files, documents, reports)
                     ▼
         LangGraph PostgresSaver (checkpoints, same database, same schema)
@@ -29,8 +29,11 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
 | `migrations/` | Alembic revisions. The schema changes only here. |
 | `runs/store.py` | Run lifecycle on Postgres: slot reservation, events, audit, files, artifacts. |
 | `runs/events.py` | JSON projection of LangGraph stream output; message-delta coalescing. |
-| `agents/runner.py` | Builds the Deep Agent, streams it, persists events and the result; thread-pool executor. |
-| `api/routes.py` | `/api/runs`, `/api/files`, `/api/tools`, artifact download. |
+| `agents/runner.py` | Builds the Deep Agent, streams it, persists events and the result (`execute_run`). |
+| `agents/supervisor.py` | One killable worker process per run: kills the process tree on cancel, timeout or shutdown; no automatic restart. `RUN_MODE=thread` runs in-process for tests. |
+| `agents/worker.py` | Worker entry point (`python -m deep_agents_app.agents.worker <run-id>`): runs one run, then exits. |
+| `runs/metrics.py` | LangChain callback writing one content-free `llm_calls` row per model call (model, status, duration, tokens). Never alters or fails a run. |
+| `api/routes.py` | `/api/runs`, `/api/files`, `/api/tools`, artifact download, `/api/runs/{id}/metrics`, `/api/metrics/summary`. |
 | `api/langgraph.py` | Narrow LangGraph-SDK-compatible read API (thread state, SSE join, cancel). |
 | `auth/` | `current_principal` seam; optional OAuth 2.0 + PKCE login (off by default). |
 | `tools/` | Registry and tools. Web access only through `tools/web.py`. |
@@ -58,14 +61,20 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
 
 ## Not in Phase 1 (known gaps)
 
-- **Isolation.** Runs execute in threads of the API process; the thread cannot be killed on timeout, only
-  detected between events (model calls have their own timeout). Document parsing is in-process and not
-  sandboxed. A separate worker process/container with resource limits is the next hardening step.
+- **Isolation is for stability, not security.** Each run is a separate worker process, so a hung or crashing run
+  is killed/failed without taking the API down, and cancel/timeout are hard stops. But the worker has the same
+  secrets and network access as the API process, and document parsing is still not sandboxed. A restricted
+  worker container (no secrets beyond what the run needs, resource limits, own network policy) is the next step.
+  Worker start-up costs a few seconds (imports); a warm worker pool is a possible optimisation.
 - **Shell / Python / browser tools** are intentionally absent; they need a separate sandbox container.
   An `interrupt()`-based approval flow (human-in-the-loop) is not wired up.
 - **No UI beyond a developer page.** The planned UI uses `@langchain/langgraph-sdk` + assistant-ui against
   `/api/langgraph/*`, which is why that API keeps the SDK's shape.
-- Saved agents, schedules, workflows, run metrics (token/latency), per-agent model selection UI.
+- Saved agents, schedules, workflows, per-agent model selection UI.
+- **Metrics** record counts, latency and tokens only. There is no price table or spend calculation: the gateway
+  (LiteLLM) already tracks spend per key/model, which is the source of truth for cost. Token counts depend on
+  what the gateway reports; streamed calls need `stream_options.include_usage` (enabled by default here).
+  A gateway that rejects it will fail model calls: adjust `llm/gateway.py` in that case.
 - Retention/cleanup of events, checkpoints, inputs and artifacts is a manual operation.
 - Postgres roles: the app expects permission to create its schema/tables; a locked-down role split
   (migration role vs runtime role) is not set up.
