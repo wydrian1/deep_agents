@@ -1,13 +1,16 @@
-"""Content-free model-call metrics.
+"""Content-free model-call metrics (ported from the previous system's ``metrics_support``).
 
-A LangChain callback records, per model call: model name, status, duration and token counts
-(input/output/cached/reasoning, when the gateway reports them). It never stores prompts,
-completions or raw error text, and it can never change or fail a run.
+A LangChain callback records, per model call (subagents included): model, status, duration, scope
+(main/subagent), graph node, HTTP status and token counts (input/output/cache-read/reasoning, when the
+gateway reports them). It never stores prompts, completions or raw error text, and it can never change
+or fail a run.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import threading
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -16,10 +19,13 @@ from uuid import UUID
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.outputs import LLMResult
 
-from .errors import classify_error
+from .errors import classify_error, http_status
 from .store import RunStore
 
 log = logging.getLogger(__name__)
+_NO_USAGE: dict[str, int | None] = {
+    "input_tokens": None, "output_tokens": None, "cache_read_tokens": None, "reasoning_tokens": None,
+}
 
 
 def _int(value: Any) -> int | None:
@@ -28,7 +34,7 @@ def _int(value: Any) -> int | None:
 
 def extract_usage(response: LLMResult) -> dict[str, int | None]:
     """Sum token usage over the response's generations (usage_metadata first, llm_output as a fallback)."""
-    totals: dict[str, int | None] = {"input_tokens": None, "output_tokens": None, "cached_tokens": None, "reasoning_tokens": None}
+    totals = dict(_NO_USAGE)
 
     def add(key: str, value: Any) -> None:
         number = _int(value)
@@ -39,13 +45,14 @@ def extract_usage(response: LLMResult) -> dict[str, int | None]:
     for generations in response.generations:
         for generation in generations:
             usage = getattr(getattr(generation, "message", None), "usage_metadata", None)
-            if not isinstance(usage, dict):
+            if not isinstance(usage, dict) or not usage:
                 continue
             found = True
+            details, output = usage.get("input_token_details"), usage.get("output_token_details")
             add("input_tokens", usage.get("input_tokens"))
             add("output_tokens", usage.get("output_tokens"))
-            add("cached_tokens", (usage.get("input_token_details") or {}).get("cache_read"))
-            add("reasoning_tokens", (usage.get("output_token_details") or {}).get("reasoning"))
+            add("cache_read_tokens", (details if isinstance(details, dict) else {}).get("cache_read"))
+            add("reasoning_tokens", (output if isinstance(output, dict) else {}).get("reasoning"))
     if not found and isinstance(response.llm_output, dict):
         legacy = response.llm_output.get("token_usage") or {}
         add("input_tokens", legacy.get("prompt_tokens"))
@@ -58,13 +65,21 @@ class MetricsCallback(BaseCallbackHandler):
 
     def __init__(self, store: RunStore, run_id: str, default_model: str):
         self.store, self.run_id, self.default_model = store, run_id, default_model
-        self._calls: dict[UUID, tuple[float, datetime, str]] = {}
+        self._calls: dict[UUID, tuple[float, datetime, str, str, str]] = {}
+        self._lock = threading.Lock()
 
     def _begin(self, run_id: UUID, kwargs: dict[str, Any]) -> None:
         params = kwargs.get("invocation_params") or {}
         name = params.get("model") or params.get("model_name")
         model = name if isinstance(name, str) and name else self.default_model
-        self._calls[run_id] = (time.monotonic(), datetime.now(UTC), model)
+        raw_metadata = kwargs.get("metadata")
+        metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+        namespace = str(metadata.get("langgraph_checkpoint_ns") or "")
+        node = re.sub(r"[^A-Za-z0-9_.:-]", "", str(metadata.get("langgraph_node") or ""))[:40]
+        with self._lock:
+            self._calls[run_id] = (
+                time.monotonic(), datetime.now(UTC), model, "subagent" if "|" in namespace else "main", node,
+            )
 
     def on_chat_model_start(self, serialized: dict[str, Any], messages: Any, *, run_id: UUID, **kwargs: Any) -> None:
         self._begin(run_id, kwargs)
@@ -72,27 +87,27 @@ class MetricsCallback(BaseCallbackHandler):
     def on_llm_start(self, serialized: dict[str, Any], prompts: Any, *, run_id: UUID, **kwargs: Any) -> None:
         self._begin(run_id, kwargs)
 
-    def _finish(self, run_id: UUID, status: str, error: str, usage: dict[str, int | None]) -> None:
-        started = self._calls.pop(run_id, None)
+    def _finish(self, call_id: UUID, status: str, error: str, http: int | None, usage: dict[str, int | None]) -> None:
+        with self._lock:
+            started = self._calls.pop(call_id, None)
         if started is None:
             return
+        monotonic, wall, model, scope, node = started
         try:
             self.store.record_llm_call(
-                run_id=self.run_id, call_id=str(run_id), model=started[2], status=status, error=error,
-                started=started[1], duration_ms=int((time.monotonic() - started[0]) * 1000), **usage,
+                run_id=self.run_id, call_id=str(call_id), model=model, status=status, error=error, scope=scope,
+                node=node, http_status=http, started=wall, duration_ms=max(0, round((time.monotonic() - monotonic) * 1000)),
+                **usage,
             )
-        except Exception as problem:
+        except Exception as problem:  # observability is best-effort
             log.warning("metrics write failed: %s", type(problem).__name__)
 
     def on_llm_end(self, response: LLMResult, *, run_id: UUID, **kwargs: Any) -> None:
         try:
             usage = extract_usage(response)
         except Exception:
-            usage = {"input_tokens": None, "output_tokens": None, "cached_tokens": None, "reasoning_tokens": None}
-        self._finish(run_id, "ok", "", usage)
+            usage = dict(_NO_USAGE)
+        self._finish(run_id, "ok", "", None, usage)
 
     def on_llm_error(self, error: BaseException, *, run_id: UUID, **kwargs: Any) -> None:
-        self._finish(
-            run_id, "error", classify_error(error),
-            {"input_tokens": None, "output_tokens": None, "cached_tokens": None, "reasoning_tokens": None},
-        )
+        self._finish(run_id, "error", classify_error(error), http_status(error), dict(_NO_USAGE))

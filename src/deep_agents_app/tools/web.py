@@ -13,6 +13,7 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
+import time
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeout
 from html.parser import HTMLParser
@@ -27,6 +28,7 @@ from .registry import ToolContext, register_tool
 
 MAX_BYTES = 2 * 1024 * 1024
 MAX_REDIRECTS = 3
+TOTAL_SECONDS = 20.0
 USER_AGENT = "DeepAgentsApp/0.1"
 
 
@@ -58,10 +60,22 @@ def validate_public_url(raw: object, settings: Settings) -> tuple[str, str]:
 
 
 def is_public_address(value: str) -> bool:
+    """Standard "globally routable" AND the previous system's explicit block list (the stricter of both).
+
+    IPv4: not 0/8, 10/8, 127/8, 100.64/10, 169.254/16, 172.16/12, 192.0/16, 192.168/16, 198.18/15, 224+.
+    IPv6: global unicast 2000::/3 only (so IPv4-mapped, loopback, link-local and unique-local are denied),
+    except the 2001:db8::/32 documentation range.
+    """
     address = ipaddress.ip_address(value.split("%")[0])
-    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
-        address = address.ipv4_mapped
-    return address.is_global and not address.is_multicast
+    if isinstance(address, ipaddress.IPv4Address):
+        a, b = address.packed[0], address.packed[1]
+        blocked = (
+            a in (0, 10, 127) or a >= 224 or (a == 169 and b == 254) or (a == 172 and 16 <= b <= 31)
+            or (a == 192 and b in (168, 0)) or (a == 100 and 64 <= b <= 127) or (a == 198 and b in (18, 19))
+        )
+        return not blocked and address.is_global
+    in_global_unicast = address in ipaddress.IPv6Network("2000::/3") and address not in ipaddress.IPv6Network("2001:db8::/32")
+    return in_global_unicast and address.is_global and not address.is_multicast
 
 
 def resolve_public(host: str) -> str:
@@ -80,14 +94,19 @@ def resolve_public(host: str) -> str:
 
 def download(
     url: str, settings: Settings, *, accept: str = "text/html, application/json, application/xml, text/plain",
-    transport: httpx.BaseTransport | None = None, depth: int = 0,
+    transport: httpx.BaseTransport | None = None, depth: int = 0, deadline: float | None = None,
 ) -> str:
+    # One overall time budget for the whole download including redirects (previous system: 20 s).
+    deadline = deadline or time.monotonic() + TOTAL_SECONDS
     host, target = validate_public_url(url, settings)
     ip = resolve_public(host)
     netloc = f"[{ip}]" if ":" in ip else ip
     headers = {"Host": host, "User-Agent": USER_AGENT, "Accept": accept, "Accept-Encoding": "identity"}
     try:
-        with httpx.Client(timeout=15, follow_redirects=False, transport=transport, trust_env=False) as client:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise WebUnavailable
+        with httpx.Client(timeout=min(15.0, remaining), follow_redirects=False, transport=transport, trust_env=False) as client:
             with client.stream(
                 "GET", f"https://{netloc}{target}", headers=headers, extensions={"sni_hostname": host}
             ) as response:
@@ -95,13 +114,15 @@ def download(
                     location = response.headers.get("location")
                     if not location or depth >= MAX_REDIRECTS:
                         raise WebUnavailable
-                    return download(urljoin(url, location), settings, accept=accept, transport=transport, depth=depth + 1)
+                    return download(
+                        urljoin(url, location), settings, accept=accept, transport=transport, depth=depth + 1, deadline=deadline
+                    )
                 if response.status_code != 200 or response.headers.get("content-encoding", "identity") != "identity":
                     raise WebUnavailable
                 body = bytearray()
                 for chunk in response.iter_bytes():
                     body.extend(chunk)
-                    if len(body) > MAX_BYTES:
+                    if len(body) > MAX_BYTES or time.monotonic() > deadline:
                         raise WebUnavailable
                 return body.decode("utf-8", errors="replace")
     except httpx.HTTPError:

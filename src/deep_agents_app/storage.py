@@ -13,6 +13,7 @@ from .config import Settings
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_FILES_PER_RUN = 10
 MAX_TOTAL_INPUT_BYTES = 10 * 1024 * 1024
+MAX_TOTAL_INPUT_BYTES = 10 * 1024 * 1024
 _ID = re.compile(r"^[a-f0-9]{32}$")
 
 

@@ -32,6 +32,8 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
 | `agents/runner.py` | Builds the Deep Agent, streams it, persists events and the result (`execute_run`). |
 | `agents/supervisor.py` | One killable worker process per run: kills the process tree on cancel, timeout or shutdown; no automatic restart. `RUN_MODE=thread` runs in-process for tests. |
 | `agents/worker.py` | Worker entry point (`python -m deep_agents_app.agents.worker <run-id>`): runs one run, then exits. |
+| `saved/` | Saved agents: `schedule.py` (pure next-occurrence rules, DST-safe), `store.py` (CRUD, optimistic revisions, atomic claim + start + advance with `SKIP LOCKED`), `limits.py` (rate-limit pause), `scheduler.py` (ticker thread; every replica may run one). |
+| `runs/outcome.py` | Failed-tool-result counting (four stop a run) and the business outcome status. |
 | `runs/metrics.py` | LangChain callback writing one content-free `llm_calls` row per model call (model, status, duration, tokens). Never alters or fails a run. |
 | `api/routes.py` | `/api/runs`, `/api/files`, `/api/tools`, artifact download, `/api/runs/{id}/metrics`, `/api/metrics/summary`. |
 | `api/langgraph.py` | Narrow LangGraph-SDK-compatible read API (thread state, SSE join, cancel). |
@@ -59,6 +61,9 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
   same-origin check for state-changing requests) is required for `/api/*`.
 - **Language.** System prompt and messages are data files; adding a language needs no code change.
 
+Differences from the earlier dashboard-embedded implementation, and why, are recorded in
+[DIVERGENCES.md](DIVERGENCES.md); keep it current when you change a deliberate difference.
+
 ## Not in Phase 1 (known gaps)
 
 - **Isolation is for stability, not security.** Each run is a separate worker process, so a hung or crashing run
@@ -70,7 +75,7 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
   An `interrupt()`-based approval flow (human-in-the-loop) is not wired up.
 - **No UI beyond a developer page.** The planned UI uses `@langchain/langgraph-sdk` + assistant-ui against
   `/api/langgraph/*`, which is why that API keeps the SDK's shape.
-- Saved agents, schedules, workflows, per-agent model selection UI.
+- Workflows (graphs of saved agents), the daily summary, per-agent model selection UI.
 - **Metrics** record counts, latency and tokens only. There is no price table or spend calculation: the gateway
   (LiteLLM) already tracks spend per key/model, which is the source of truth for cost. Token counts depend on
   what the gateway reports; streamed calls need `stream_options.include_usage` (enabled by default here).

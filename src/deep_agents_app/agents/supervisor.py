@@ -25,11 +25,11 @@ from typing import Any
 
 from ..config import Settings
 from ..runs.store import RunStore
-from .runner import execute_run
+from .runner import ENV_PREFIXES_REMOVED, execute_run
 
 log = logging.getLogger(__name__)
 POLL_SECONDS = 0.5
-_STRIPPED_PREFIXES = ("LANGSMITH", "LANGCHAIN", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
+_STRIPPED_PREFIXES = ENV_PREFIXES_REMOVED
 
 
 def worker_command(run_id: str) -> list[str]:

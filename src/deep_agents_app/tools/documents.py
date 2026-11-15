@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import io
 import re
+import time
 import zipfile
 from typing import Any
 
@@ -19,6 +20,7 @@ from defusedxml import ElementTree
 from .. import storage
 from .registry import ToolContext, register_tool
 
+SEARCH_SECONDS = 45
 PAGE = 32000
 MAX_TEXT = 120000
 MAX_PDF_PAGES = 100
@@ -127,6 +129,51 @@ def files_tools(ctx: ToolContext) -> list:
         return {"name": row["name"], "offset": offset, "encoding": encoding, "content": value}
 
     return [file_list, file_read]
+
+
+@register_tool(
+    "file_search", label="Search attached files", access="read", requires=("files",),
+    description="Literal, case-insensitive search ONLY in the attached files (at most 10 excerpts). "
+    "PDF/Office content needs the document tool too. Coverage and skipped files are reported explicitly.",
+)
+def file_search_tools(ctx: ToolContext) -> list:
+    def file_search(query: str) -> dict[str, Any]:
+        """Search the attached files for a literal text (1-120 characters). Returns at most 10 excerpts, one per file."""
+        if not isinstance(query, str) or not 1 <= len(query.strip()) <= 120:
+            return {"error": ctx.t("tool_bad_input")}
+        needle, pattern = query.strip().casefold(), re.compile(re.escape(query.strip()), re.IGNORECASE)
+        attached = ctx.store.get_input_files(ctx.file_ids)
+        matches: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        scanned, deadline = 0, time.monotonic() + SEARCH_SECONDS
+        for row in attached:
+            try:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError
+                content = storage.read_checked(
+                    storage.input_path(ctx.settings, row["id"]), row["size"], row["sha256"], storage.MAX_UPLOAD_BYTES
+                )
+                if "document" in ctx.enabled:
+                    text = extract_text(row["name"], content)
+                else:
+                    text = content.decode("utf-8-sig")[:MAX_TEXT]
+                    if "\x00" in text:
+                        raise ValueError
+                scanned += 1
+                found = pattern.search(text)
+                if found or needle in row["name"].casefold():
+                    index = found.start() if found else 0
+                    matches.append(
+                        {"file_id": row["id"], "name": row["name"], "offset": index, "excerpt": text[max(0, index - 160) : index + 340]}
+                    )
+            except Exception:  # unreadable, binary without the document tool, changed, or out of time
+                skipped.append({"file_id": row["id"], "name": row["name"], "reason": ctx.t("file_unreadable")})
+        return {
+            "matches": matches[:10], "scanned": scanned, "attached": len(attached), "skipped": skipped,
+            "coverage": f"First {MAX_TEXT} characters of each attached file; the first match per file only.",
+        }
+
+    return [file_search]
 
 
 @register_tool(

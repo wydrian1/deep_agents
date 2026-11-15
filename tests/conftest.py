@@ -31,6 +31,7 @@ def make_settings(database_url: str, schema: str, data_dir, **overrides) -> Sett
         llm_api_key="test-key",
         app_language="en",
         run_mode="thread",  # fast in-process runs; process mode has its own tests
+        scheduler_enabled=False,  # tests drive scheduler.tick(now) explicitly
     )
     return Settings(_env_file=None, **{**values, **overrides})  # type: ignore[arg-type]
 
@@ -57,6 +58,10 @@ def store(settings):
 def client(settings):
     with TestClient(create_app(settings)) as test_client:
         yield test_client
+        # Let in-flight runs finish before the schema is dropped (no noisy background failures).
+        pool = getattr(test_client.app.state.executor, "pool", None)
+        if pool is not None:
+            pool.shutdown(wait=True)
 
 
 def wait_for_status(client: TestClient, run_id: str, wanted=("completed", "failed", "cancelled"), seconds: float = 30):
