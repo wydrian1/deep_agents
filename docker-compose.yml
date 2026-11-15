@@ -11,6 +11,9 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - agents-data:/data
+    # Each run is a worker process inside this container; cap the whole service.
+    pids_limit: 512
+    # mem_limit: 2g   # set a limit that fits your host (workers share it)
     restart: unless-stopped
 
   postgres:

@@ -7,7 +7,10 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from deep_agents_app.config import Settings
+from deep_agents_app.db.engine import make_engine
+from deep_agents_app.db.migrate import migrate
 from deep_agents_app.main import create_app
+from deep_agents_app.runs.store import RunStore
 
 
 @pytest.fixture(scope="session")
@@ -27,6 +30,7 @@ def make_settings(database_url: str, schema: str, data_dir, **overrides) -> Sett
         llm_gateway_url="http://litellm.test/v1",
         llm_api_key="test-key",
         app_language="en",
+        run_mode="thread",  # fast in-process runs; process mode has its own tests
     )
     return Settings(_env_file=None, **{**values, **overrides})  # type: ignore[arg-type]
 
@@ -38,6 +42,14 @@ def settings(database_url, tmp_path):
     engine = create_engine(Settings(_env_file=None, database_url=database_url).sqlalchemy_url)  # type: ignore[call-arg]
     with engine.begin() as db:
         db.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
+    engine.dispose()
+
+
+@pytest.fixture
+def store(settings):
+    engine = make_engine(settings)
+    migrate(settings, engine)
+    yield RunStore(engine, settings)
     engine.dispose()
 
 

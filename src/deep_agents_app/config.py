@@ -6,7 +6,7 @@ import json
 import re
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from pydantic import SecretStr, field_validator, model_validator
@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     run_timeout_seconds: int = 3600
     allow_test_mode: bool = True
     web_blocked_hosts: str = ""
+    # "process": every run in its own worker process that can be killed on cancel/timeout.
+    # "thread": in the API process (tests/debugging only; a hung run cannot be killed).
+    run_mode: Literal["process", "thread"] = "process"
+    # Per-worker address-space limit in MB (POSIX only, 0 = off). Leave off unless you have measured it;
+    # prefer container limits (mem_limit/pids_limit) for the whole service.
+    worker_memory_mb: int = 0
 
     # Optional OAuth 2.0 / OIDC login. OFF by default: with AUTH_ENABLED=false the service
     # has no login and no access protection at all (see auth/__init__.py).
@@ -109,6 +115,23 @@ class Settings(BaseSettings):
         if value < 1:
             raise ValueError("must be at least 1")
         return value
+
+    @field_validator("worker_memory_mb")
+    @classmethod
+    def _memory(cls, value: int) -> int:
+        if value < 0:
+            raise ValueError("must not be negative")
+        return value
+
+    def to_env(self) -> dict[str, str]:
+        """This configuration as environment variables, so a worker process sees exactly the same settings."""
+        env: dict[str, str] = {}
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if isinstance(value, SecretStr):
+                value = value.get_secret_value()
+            env[name.upper()] = str(value).lower() if isinstance(value, bool) else str(value)
+        return env
 
     @property
     def llm_params(self) -> dict[str, Any]:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import os
 import time
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from typing import Any
 
@@ -103,24 +102,3 @@ def execute_run(settings: Settings, store: RunStore, run_id: str) -> None:
             buffer.flush()
         except Exception:  # noqa: S110 - the run's final status is already recorded
             pass
-
-
-class RunExecutor:
-    """Runs agents on a bounded thread pool. No automatic retries at any level."""
-
-    def __init__(self, settings: Settings, store: RunStore):
-        self.settings, self.store = settings, store
-        self.pool = ThreadPoolExecutor(max_workers=settings.max_concurrent_runs, thread_name_prefix="run")
-
-    def submit(self, run_id: str) -> None:
-        self.pool.submit(self._guarded, run_id)
-
-    def _guarded(self, run_id: str) -> None:
-        try:
-            execute_run(self.settings, self.store, run_id)
-        except Exception as error:  # last resort: never leave a run stuck in "running"
-            log.error("run %s crashed: %s", run_id, type(error).__name__)
-            self.store.update(run_id, status="failed", error="run_failed")
-
-    def shutdown(self) -> None:
-        self.pool.shutdown(wait=False, cancel_futures=True)

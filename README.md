@@ -51,6 +51,7 @@ All settings are environment variables; see [.env.example](.env.example) for the
 | Database | `DATABASE_URL`, `DATABASE_SCHEMA`, `AUTO_MIGRATE` |
 | Gateway | `LLM_GATEWAY_URL`, `LLM_API_KEY`, `DEFAULT_MODEL`, `LLM_PARAMS_JSON`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` |
 | Behaviour | `APP_LANGUAGE`, `DATA_DIR`, `MAX_CONCURRENT_RUNS`, `RUN_TIMEOUT_SECONDS`, `ALLOW_TEST_MODE`, `WEB_BLOCKED_HOSTS` |
+| Execution | `RUN_MODE` (`process` default, `thread` for tests), `WORKER_MEMORY_MB` |
 | OAuth login (off) | `AUTH_ENABLED`, `OAUTH_*`, `SESSION_SECRET`, `COOKIE_SECURE` |
 
 ### Enabling the OAuth login later

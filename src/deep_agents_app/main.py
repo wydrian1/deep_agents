@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse, Response
 from sqlalchemy import text
 
 from . import __version__
-from .agents.runner import RunExecutor
+from .agents.supervisor import make_executor
 from .api import langgraph, routes
 from .auth import oauth
 from .config import Settings, get_settings
@@ -33,7 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             migrate(settings, engine)
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         store = RunStore(engine, settings)
-        executor = RunExecutor(settings, store)
+        executor = make_executor(settings, store)
         app.state.engine, app.state.store, app.state.executor = engine, store, executor
         if not settings.auth_enabled:
             log.warning("AUTH_ENABLED=false: the service has NO login or access protection.")
