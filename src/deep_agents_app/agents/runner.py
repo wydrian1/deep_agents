@@ -15,10 +15,13 @@ from ..llm.gateway import GatewayNotConfigured, ModelNotConfigured, build_model,
 from ..runs.errors import classify_error
 from ..runs.events import EventBuffer
 from ..runs.metrics import MetricsCallback
+from ..runs.outcome import MAX_TOOL_FAILURES, assess_outcome, validation_failures
 from ..runs.store import EventLimit, RunStore
 from ..tools.registry import ToolContext, build_tools
 
 log = logging.getLogger(__name__)
+# Prefixes removed from a run's environment (shared with the worker launcher).
+ENV_PREFIXES_REMOVED = ("LANGSMITH", "LANGCHAIN", "OPENAI", "ANTHROPIC", "GOOGLE", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY")
 RECURSION_LIMIT = 1000
 MAX_GRAPH_CONCURRENCY = 2  # streaming needs a spare executor waiter; 1 would deadlock
 CANCEL_POLL_SECONDS = 1.0
@@ -47,9 +50,10 @@ def build_agent(settings: Settings, run: dict[str, Any], store: RunStore, saver:
 def execute_run(settings: Settings, store: RunStore, run_id: str) -> None:
     from langgraph.checkpoint.postgres import PostgresSaver
 
-    # A worker must not inherit tracing or provider overrides from the process environment.
+    # No tracing, provider keys/base-URL overrides or proxies from the process environment may influence the
+    # run (as in the previous system): the gateway is configured only through our own settings.
     for key in list(os.environ):
-        if key.startswith(("LANGSMITH", "LANGCHAIN")):
+        if key.upper().startswith(ENV_PREFIXES_REMOVED):
             del os.environ[key]
     os.environ["LANGSMITH_TRACING"] = "false"
 
@@ -77,6 +81,10 @@ def execute_run(settings: Settings, store: RunStore, run_id: str) -> None:
             ):
                 buffer.append(mode + ("|" + "|".join(namespace) if namespace else ""), event)
                 if mode == "values" and not namespace:
+                    if validation_failures(event.get("messages", [])) >= MAX_TOOL_FAILURES:
+                        buffer.flush()
+                        store.update(run_id, status="failed", outcome_status="blocked", error="run_blocked_tool_errors")
+                        return
                     steps += 1
                     store.update(run_id, steps=steps)
                 if time.monotonic() - last_check >= CANCEL_POLL_SECONDS:
@@ -92,7 +100,8 @@ def execute_run(settings: Settings, store: RunStore, run_id: str) -> None:
             if not text:
                 store.update(run_id, status="failed", error="error_empty_result")
             else:
-                store.update(run_id, status="completed", result=text[:64000])
+                outcome = assess_outcome(text, messages, store.audit_errors(run_id))
+                store.update(run_id, status="completed", result=text[:64000], outcome_status=outcome)
     except (GatewayNotConfigured, ModelNotConfigured):
         store.update(run_id, status="failed", error="gateway_not_configured")
     except EventLimit:

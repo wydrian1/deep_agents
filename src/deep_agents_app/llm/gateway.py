@@ -41,6 +41,8 @@ def build_model(settings: Settings, model: str, run_id: str) -> BaseChatModel:
     params = dict(settings.llm_params)
     # Metadata only (no content): lets the gateway group one run's calls.
     extra_body = {"metadata": {"run_id": run_id}, **params.pop("extra_body", {})}
+    if settings.llm_prompt_cache_key:
+        params.setdefault("prompt_cache_key", run_id)
     return ChatOpenAI(
         model=model,
         base_url=settings.llm_gateway_url,

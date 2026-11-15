@@ -13,12 +13,16 @@ from sqlalchemy import text
 
 from . import __version__
 from .agents.supervisor import make_executor
+from .api import agents as agents_api
 from .api import langgraph, routes
+from .api.limits import BodyLimitMiddleware
 from .auth import oauth
 from .config import Settings, get_settings
 from .db.engine import make_engine
 from .db.migrate import migrate
 from .runs.store import RunStore
+from .saved.scheduler import Scheduler
+from .saved.store import SavedAgentStore
 
 log = logging.getLogger(__name__)
 
@@ -34,10 +38,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
         store = RunStore(engine, settings)
         executor = make_executor(settings, store)
+        agents = SavedAgentStore(store, settings)
+        scheduler = Scheduler(agents, executor.submit, settings.scheduler_interval_seconds)
         app.state.engine, app.state.store, app.state.executor = engine, store, executor
+        app.state.agents, app.state.scheduler = agents, scheduler
         if not settings.auth_enabled:
             log.warning("AUTH_ENABLED=false: the service has NO login or access protection.")
+        if settings.scheduler_enabled:
+            scheduler.start()
         yield
+        scheduler.stop()
         executor.shutdown()
         engine.dispose()
 
@@ -62,7 +72,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'", "X-Content-Type-Options": "nosniff"},
         )
 
+    app.add_middleware(BodyLimitMiddleware, language=settings.app_language)
     app.include_router(routes.router())
+    app.include_router(agents_api.router())
     app.include_router(langgraph.router())
     if settings.auth_enabled:
         app.include_router(oauth.router(settings))

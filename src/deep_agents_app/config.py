@@ -8,6 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -38,12 +39,24 @@ class Settings(BaseSettings):
     run_timeout_seconds: int = 3600
     allow_test_mode: bool = True
     web_blocked_hosts: str = ""
+    max_prompt_chars: int = 4000  # the previous system's limit; raise it deliberately
+    min_free_disk_mb: int = 280  # refuse new runs below this free space in DATA_DIR (previous system: 280)
+    # Send prompt_cache_key=<run id> so one run's calls stay on one cache. Off by default: not every provider
+    # behind a gateway accepts it. (The previous system always sent it.)
+    llm_prompt_cache_key: bool = False
     # "process": every run in its own worker process that can be killed on cancel/timeout.
     # "thread": in the API process (tests/debugging only; a hung run cannot be killed).
     run_mode: Literal["process", "thread"] = "process"
     # Per-worker address-space limit in MB (POSIX only, 0 = off). Leave off unless you have measured it;
     # prefer container limits (mem_limit/pids_limit) for the whole service.
     worker_memory_mb: int = 0
+    # Scheduler for saved agents. Safe with several replicas (rows are claimed with SKIP LOCKED).
+    scheduler_enabled: bool = True
+    scheduler_interval_seconds: int = 30
+    # IANA zone in which daily/weekly schedules are written, e.g. "Europe/Budapest".
+    schedule_timezone: str = "UTC"
+    # Scheduled starts pause this long after a rate-limited model call (0 = never pause). See saved/limits.py.
+    rate_limit_cooldown_seconds: int = 3600
 
     # Optional OAuth 2.0 / OIDC login. OFF by default: with AUTH_ENABLED=false the service
     # has no login and no access protection at all (see auth/__init__.py).
@@ -116,7 +129,30 @@ class Settings(BaseSettings):
             raise ValueError("must be at least 1")
         return value
 
-    @field_validator("worker_memory_mb")
+    @field_validator("schedule_timezone")
+    @classmethod
+    def _timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError):
+            raise ValueError(f"unknown time zone: {value}") from None
+        return value
+
+    @field_validator("scheduler_interval_seconds")
+    @classmethod
+    def _interval(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("must be at least 1")
+        return value
+
+    @field_validator("max_prompt_chars", "min_free_disk_mb")
+    @classmethod
+    def _at_least_one(cls, value: int) -> int:
+        if value < 1:
+            raise ValueError("must be at least 1")
+        return value
+
+    @field_validator("worker_memory_mb", "rate_limit_cooldown_seconds")
     @classmethod
     def _memory(cls, value: int) -> int:
         if value < 0:

@@ -18,6 +18,15 @@ It is a development foundation, not a finished product (see [docs/ARCHITECTURE.m
 - Configurable language (`APP_LANGUAGE`: `en`, `hu`; add more as data files).
 - Content-free model-call metrics (duration, status, input/output/cached/reasoning tokens) per run and per model:
   `GET /api/runs/{id}/metrics`, `GET /api/metrics/summary?days=7`. Prompts, completions and raw errors are never stored there.
+- **Saved agents and schedules** (`/api/agents`): store a run configuration, run it now, or schedule it hourly,
+  daily or weekly (`SCHEDULE_TIMEZONE`). Scheduling needs explicit consent (`confirm_recurring_cost`), has no
+  catch-up (occurrences more than 5 minutes late are skipped), waits when the agent or all slots are busy, never
+  retries, and pauses after a rate-limited model call. Edits use optimistic revisions (409 on a stale one).
+  Also: rerun a run as a new run (`POST /api/runs/{id}/rerun`), save a run's original settings as an agent
+  (`POST /api/agents/from-run/{run_id}`), enable/pause a schedule (`POST /api/agents/{id}/enable`).
+- Safety nets: a run stops after four failed tool results; every run gets a business outcome status
+  (`success|noop|blocked|error|unknown`); JSON bodies are limited to 18,000 bytes and unknown fields are rejected.
+- `GET /api/status`: limits, scheduler heartbeat and an active rate-limit pause.
 - A LangGraph-SDK-compatible read API and a minimal developer page at `/`.
 - Optional OAuth 2.0 (authorization code + PKCE) login, off by default.
 
@@ -76,3 +85,5 @@ ruff check . && mypy src && pytest
 ```
 
 Tests that need Postgres are skipped when `TEST_DATABASE_URL` is unset. Contributor rules: [AGENTS.md](AGENTS.md).
+Where this service deliberately differs from the earlier dashboard-embedded implementation:
+[docs/DIVERGENCES.md](docs/DIVERGENCES.md).

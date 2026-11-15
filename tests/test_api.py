@@ -18,7 +18,7 @@ def test_healthz_and_index_need_no_login(client):
 
 def test_tool_catalog_lists_builtin_tools(client):
     names = {tool["name"] for tool in client.get("/api/tools").json()}
-    assert names == {"webfetch", "websearch", "github", "files", "document", "report"}
+    assert names == {"webfetch", "websearch", "github", "files", "file_search", "document", "report"}
 
 
 def test_offline_run_completes_with_events_and_state(client):

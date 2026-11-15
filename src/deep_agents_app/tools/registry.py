@@ -2,6 +2,11 @@
 
 Add a tool by writing a factory and decorating it with :func:`register_tool`. Tools are
 opt-in per run (``tools`` in the run request); nothing is enabled by default.
+
+Every call is audited (tool, operation, outcome, duration; never arguments or content). The row is written
+BEFORE the call as ``started``, so an interrupted call can never count as a success. All tools together are
+limited to 200 calls per run (the previous system capped only its document/search/report tools; a runaway
+web-fetch loop costs just as much).
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ class ToolContext:
     run_id: str
     language: str
     file_ids: list[str] = field(default_factory=list)
+    enabled: list[str] = field(default_factory=list)  # the run's tool grants
 
     def t(self, key: str, **values: object) -> str:
         return message(key, self.language, **values)
@@ -42,12 +48,13 @@ class ToolSpec:
 
 
 REGISTRY: dict[str, ToolSpec] = {}
+Factory = Callable[[ToolContext], list[Callable[..., Any]]]
 
 
 def register_tool(
     name: str, *, label: str, access: str, description: str, requires: tuple[str, ...] = ()
-) -> Callable[[Callable[[ToolContext], list[Callable[..., Any]]]], Callable[[ToolContext], list[Callable[..., Any]]]]:
-    def decorate(factory: Callable[[ToolContext], list[Callable[..., Any]]]) -> Callable[[ToolContext], list[Callable[..., Any]]]:
+) -> Callable[[Factory], Factory]:
+    def decorate(factory: Factory) -> Factory:
         REGISTRY[name] = ToolSpec(name, label, access, description, factory, requires)
         return factory
 
@@ -67,7 +74,7 @@ def catalog() -> list[dict[str, Any]]:
 
 
 def validate_selection(names: list[str]) -> list[str]:
-    """Return the missing/unknown tool names (empty list = valid) after adding nothing silently."""
+    """Return the missing/unknown tool names (empty list = valid)."""
     load_builtin_tools()
     problems = [n for n in names if n not in REGISTRY]
     for name in names:
@@ -78,7 +85,7 @@ def validate_selection(names: list[str]) -> list[str]:
 
 
 def audited(ctx: ToolContext, tool_name: str, function: Callable[..., Any]) -> Callable[..., Any]:
-    """Record operation/outcome/duration (never arguments or content) and cap calls per run."""
+    """Audit around a tool function: run still active, per-run call cap, started -> ok|error."""
 
     @functools.wraps(function)
     def wrapper(*args: Any, **kwargs: Any) -> Any:
@@ -86,7 +93,9 @@ def audited(ctx: ToolContext, tool_name: str, function: Callable[..., Any]) -> C
             return {"error": ctx.t("run_cancelled")}
         if ctx.store.tool_calls(ctx.run_id) >= MAX_TOOL_CALLS_PER_RUN:
             return {"error": ctx.t("tool_limit")}
-        started, outcome = time.monotonic(), "error"
+        started = time.monotonic()
+        audit_id = ctx.store.audit_start(ctx.run_id, tool_name, function.__name__)
+        outcome = "error"
         try:
             result = function(*args, **kwargs)
             outcome = "error" if isinstance(result, dict) and "error" in result else "ok"
@@ -94,13 +103,14 @@ def audited(ctx: ToolContext, tool_name: str, function: Callable[..., Any]) -> C
         except Exception:
             return {"error": ctx.t("tool_failed")}
         finally:
-            ctx.store.audit(ctx.run_id, tool_name, outcome, int((time.monotonic() - started) * 1000))
+            ctx.store.audit_finish(audit_id, outcome, int((time.monotonic() - started) * 1000))
 
     return wrapper
 
 
 def build_tools(names: list[str], ctx: ToolContext) -> list[Callable[..., Any]]:
     load_builtin_tools()
+    ctx.enabled = list(names)
     tools: list[Callable[..., Any]] = []
     for name in names:
         spec = REGISTRY[name]
