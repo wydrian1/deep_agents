@@ -14,6 +14,7 @@ from ..i18n import system_prompt
 from ..llm.gateway import GatewayNotConfigured, ModelNotConfigured, build_model, build_test_model
 from ..runs.errors import classify_error
 from ..runs.events import EventBuffer
+from ..runs.metrics import MetricsCallback
 from ..runs.store import EventLimit, RunStore
 from ..tools.registry import ToolContext, build_tools
 
@@ -64,6 +65,8 @@ def execute_run(settings: Settings, store: RunStore, run_id: str) -> None:
                 "configurable": {"thread_id": run_id},
                 "recursion_limit": RECURSION_LIMIT,
                 "max_concurrency": MAX_GRAPH_CONCURRENCY,
+                # Content-free call timing/token metrics; the callback can never alter or fail the run.
+                "callbacks": [MetricsCallback(store, run_id, run["model"])],
             }
             store.update(run_id, graph=agent.get_graph().to_json())
             store.append_event(run_id, "metadata", {"run_id": run_id, "thread_id": run_id})

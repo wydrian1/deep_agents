@@ -56,6 +56,25 @@ tool_audit = Table(
     Index("tool_audit_run_id_id", "run_id", "id"),
 )
 
+llm_calls = Table(
+    "llm_calls",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("call_id", Text, nullable=False),
+    Column("model", Text, nullable=False),
+    Column("status", Text, nullable=False),  # "ok" | "error"
+    Column("error", Text, nullable=False, server_default=""),  # message key, never raw text
+    Column("started", TIMESTAMP(timezone=True), nullable=False),
+    Column("duration_ms", Integer, nullable=False),
+    Column("input_tokens", Integer),
+    Column("output_tokens", Integer),
+    Column("cached_tokens", Integer),
+    Column("reasoning_tokens", Integer),
+    Index("llm_calls_run_id_id", "run_id", "id"),
+    Index("llm_calls_started", "started"),
+)
+
 input_files = Table(
     "input_files",
     metadata,

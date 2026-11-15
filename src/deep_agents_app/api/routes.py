@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -113,6 +113,24 @@ def router() -> APIRouter:
         if not run:
             raise HTTPException(404, message("run_not_found", request.app.state.settings.app_language))
         return public_run(run, full=True) | {"artifacts": store.list_artifacts(run_id)}
+
+    @api.get("/runs/{run_id}/metrics")
+    def run_metrics(run_id: str, request: Request) -> dict[str, Any]:
+        """Content-free model-call metrics for one run (timing, status, token counts)."""
+        store = request.app.state.store
+        run = store.get(valid_run_id(run_id))
+        if not run:
+            raise HTTPException(404, message("run_not_found", request.app.state.settings.app_language))
+        metrics = store.run_metrics(run_id)
+        for call in metrics["calls"]:
+            call["error"] = message(call["error"], run["language"]) if call["error"] else ""
+            call["started"] = call["started"].isoformat()
+        return metrics
+
+    @api.get("/metrics/summary")
+    def metrics_summary(request: Request, days: int = Query(default=7, ge=1, le=90)) -> dict[str, Any]:
+        """Per-model call counts, errors, tokens and latency over the last ``days`` days."""
+        return {"days": days, "models": request.app.state.store.metrics_summary(days)}
 
     @api.post("/runs/{run_id}/cancel", status_code=202)
     def cancel_run(run_id: str, request: Request) -> dict[str, Any]:

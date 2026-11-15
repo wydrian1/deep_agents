@@ -37,9 +37,21 @@ class _Status(Exception):
         self.status_code = code
 
 
+def test_wrapped_causes_are_classified_too():
+    try:
+        try:
+            raise _Status(429)
+        except _Status as inner:
+            raise RuntimeError("wrapper") from inner
+    except RuntimeError as outer:
+        assert classify_error(outer) == "error_rate_limited"
+
+
 @pytest.mark.parametrize(
     ("error", "key"),
-    [(_Status(429), "error_rate_limited"), (_Status(401), "error_gateway_auth"), (_Status(400), "error_gateway_request"),
+    [(type("OpenAIConnectionError", (Exception,), {})("x"), "error_gateway_unavailable"),
+     (type("ReadTimeout", (Exception,), {})("x"), "error_gateway_unavailable"),
+     (_Status(429), "error_rate_limited"), (_Status(401), "error_gateway_auth"), (_Status(400), "error_gateway_request"),
      (_Status(502), "error_gateway_unavailable"), (TimeoutError(), "error_gateway_unavailable"), (ValueError("x"), "run_failed")],
 )
 def test_errors_map_to_message_keys(error, key):

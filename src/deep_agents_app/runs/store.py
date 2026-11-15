@@ -10,7 +10,7 @@ from typing import Any
 from sqlalchemy import Engine, func, insert, select, text, update
 
 from ..config import Settings
-from ..db.schema import artifacts, input_files, run_events, runs, tool_audit
+from ..db.schema import artifacts, input_files, llm_calls, run_events, runs, tool_audit
 from .events import serializable
 
 ACTIVE = "running"
@@ -165,6 +165,53 @@ class RunStore:
     def tool_calls(self, run_id: str) -> int:
         with self.engine.connect() as db:
             return db.execute(select(func.count()).select_from(tool_audit).where(tool_audit.c.run_id == run_id)).scalar_one()
+
+    # -- model-call metrics (content-free) ------------------------------------------------
+
+    def record_llm_call(self, **values: Any) -> None:
+        with self.engine.begin() as db:
+            db.execute(insert(llm_calls).values(**values))
+
+    def run_metrics(self, run_id: str) -> dict[str, Any]:
+        with self.engine.connect() as db:
+            rows = [
+                dict(r)
+                for r in db.execute(select(llm_calls).where(llm_calls.c.run_id == run_id).order_by(llm_calls.c.id)).mappings()
+            ]
+        totals = {
+            "calls": len(rows),
+            "errors": sum(1 for r in rows if r["status"] == "error"),
+            "duration_ms": sum(r["duration_ms"] for r in rows),
+        }
+        for key in ("input_tokens", "output_tokens", "cached_tokens", "reasoning_tokens"):
+            values = [r[key] for r in rows if r[key] is not None]
+            totals[key] = sum(values) if values else None
+        return {"totals": totals, "calls": rows}
+
+    def metrics_summary(self, days: int) -> list[dict[str, Any]]:
+        since = now() - timedelta(days=days)
+        with self.engine.connect() as db:
+            rows = db.execute(
+                select(
+                    llm_calls.c.model,
+                    func.count().label("calls"),
+                    func.count().filter(llm_calls.c.status == "error").label("errors"),
+                    func.sum(llm_calls.c.input_tokens).label("input_tokens"),
+                    func.sum(llm_calls.c.output_tokens).label("output_tokens"),
+                    func.sum(llm_calls.c.cached_tokens).label("cached_tokens"),
+                    func.sum(llm_calls.c.reasoning_tokens).label("reasoning_tokens"),
+                    func.avg(llm_calls.c.duration_ms).label("avg_duration_ms"),
+                    func.max(llm_calls.c.duration_ms).label("max_duration_ms"),
+                )
+                .where(llm_calls.c.started >= since)
+                .group_by(llm_calls.c.model)
+                .order_by(func.count().desc())
+            ).mappings()
+            return [
+                {**r, "avg_duration_ms": int(r["avg_duration_ms"]) if r["avg_duration_ms"] is not None else None}
+                | {k: (int(r[k]) if r[k] is not None else None) for k in ("input_tokens", "output_tokens", "cached_tokens", "reasoning_tokens")}
+                for r in rows
+            ]
 
     # -- input files ----------------------------------------------------------------------
 

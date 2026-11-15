@@ -16,6 +16,8 @@ It is a development foundation, not a finished product (see [docs/ARCHITECTURE.m
 - General tools, opt-in per run: `webfetch`, `websearch`, `github` (public, read-only), `files`,
   `document` (PDF/DOCX/PPTX/XLSX/text), `report` (private md/txt/csv/xlsx/pdf outputs).
 - Configurable language (`APP_LANGUAGE`: `en`, `hu`; add more as data files).
+- Content-free model-call metrics (duration, status, input/output/cached/reasoning tokens) per run and per model:
+  `GET /api/runs/{id}/metrics`, `GET /api/metrics/summary?days=7`. Prompts, completions and raw errors are never stored there.
 - A LangGraph-SDK-compatible read API and a minimal developer page at `/`.
 - Optional OAuth 2.0 (authorization code + PKCE) login, off by default.
 

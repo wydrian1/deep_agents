@@ -32,7 +32,8 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
 | `agents/runner.py` | Builds the Deep Agent, streams it, persists events and the result (`execute_run`). |
 | `agents/supervisor.py` | One killable worker process per run: kills the process tree on cancel, timeout or shutdown; no automatic restart. `RUN_MODE=thread` runs in-process for tests. |
 | `agents/worker.py` | Worker entry point (`python -m deep_agents_app.agents.worker <run-id>`): runs one run, then exits. |
-| `api/routes.py` | `/api/runs`, `/api/files`, `/api/tools`, artifact download. |
+| `runs/metrics.py` | LangChain callback writing one content-free `llm_calls` row per model call (model, status, duration, tokens). Never alters or fails a run. |
+| `api/routes.py` | `/api/runs`, `/api/files`, `/api/tools`, artifact download, `/api/runs/{id}/metrics`, `/api/metrics/summary`. |
 | `api/langgraph.py` | Narrow LangGraph-SDK-compatible read API (thread state, SSE join, cancel). |
 | `auth/` | `current_principal` seam; optional OAuth 2.0 + PKCE login (off by default). |
 | `tools/` | Registry and tools. Web access only through `tools/web.py`. |
@@ -69,7 +70,11 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
   An `interrupt()`-based approval flow (human-in-the-loop) is not wired up.
 - **No UI beyond a developer page.** The planned UI uses `@langchain/langgraph-sdk` + assistant-ui against
   `/api/langgraph/*`, which is why that API keeps the SDK's shape.
-- Saved agents, schedules, workflows, run metrics (token/latency), per-agent model selection UI.
+- Saved agents, schedules, workflows, per-agent model selection UI.
+- **Metrics** record counts, latency and tokens only. There is no price table or spend calculation: the gateway
+  (LiteLLM) already tracks spend per key/model, which is the source of truth for cost. Token counts depend on
+  what the gateway reports; streamed calls need `stream_options.include_usage` (enabled by default here).
+  A gateway that rejects it will fail model calls: adjust `llm/gateway.py` in that case.
 - Retention/cleanup of events, checkpoints, inputs and artifacts is a manual operation.
 - Postgres roles: the app expects permission to create its schema/tables; a locked-down role split
   (migration role vs runtime role) is not set up.
