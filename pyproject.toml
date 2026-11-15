@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deep-agents-app"
+version = "0.1.0"
+description = "Standalone Deep Agents service: FastAPI + LangGraph + external Postgres + LiteLLM gateway."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "deepagents==0.7.34",
+    "langchain-openai==1.8.0",
+    "langgraph-checkpoint-postgres==3.2.1",
+    "psycopg[binary,pool]==3.3.9",
+    "fastapi==0.163.1",
+    "uvicorn==0.54.0",
+    "pydantic-settings==2.16.3",
+    "alembic==1.20.1",
+    "sqlalchemy==2.1.8",
+    "httpx==0.28.1",
+    "defusedxml==0.7.1",
+    "pypdf==7.1.0",
+    "openpyxl==3.1.5",
+    "reportlab==5.1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.2.0",
+    "ruff==0.17.5",
+    "mypy==2.4.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+deep_agents_app = ["prompts/*.md", "messages/*.json", "static/*", "migrations/script.py.mako"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+ignore = ["S101", "E501"]  # no auto-formatter is enforced; long lines are tolerated
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S", "B", "E501"]
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+check_untyped_defs = true
+warn_unused_ignores = true

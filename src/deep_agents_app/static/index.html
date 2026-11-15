@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deep Agents</title>
+<style>
+  :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+  body { max-width: 52rem; margin: 0 auto; padding: 1rem; }
+  textarea { width: 100%; min-height: 6rem; box-sizing: border-box; }
+  fieldset { margin: .75rem 0; }
+  label { margin-right: 1rem; white-space: nowrap; }
+  pre { white-space: pre-wrap; word-break: break-word; border: 1px solid #8884; padding: .75rem; max-height: 24rem; overflow: auto; }
+  .muted { opacity: .7; font-size: .9em; }
+  #runs li { cursor: pointer; margin: .25rem 0; }
+</style>
+</head>
+<body>
+<h1>Deep Agents</h1>
+<p class="muted">Minimal developer page. No login unless AUTH_ENABLED=true.</p>
+<form id="form">
+  <textarea id="prompt" placeholder="Task prompt" required></textarea>
+  <fieldset id="tools"><legend>Tools</legend></fieldset>
+  <label><input type="checkbox" id="test"> offline test model</label>
+  <button>Start run</button>
+</form>
+<p id="status" role="status"></p>
+<h2>Output</h2>
+<pre id="out"></pre>
+<h2>Recent runs</h2>
+<ul id="runs"></ul>
+<script>
+const $ = (id) => document.getElementById(id);
+let source = null;
+async function api(path, options) {
+  const response = await fetch(path, options);
+  if (response.status === 401) { $("status").innerHTML = ""; const a = document.createElement("a"); a.href = "/auth/login"; a.textContent = "Log in"; $("status").append(a); throw new Error("401"); }
+  if (!response.ok) { const body = await response.json().catch(() => ({})); throw new Error(body.detail || response.statusText); }
+  return response.status === 204 ? null : response.json();
+}
+async function loadTools() {
+  for (const tool of await api("/api/tools")) {
+    const label = document.createElement("label"), box = document.createElement("input");
+    box.type = "checkbox"; box.value = tool.name; label.title = tool.description;
+    label.append(box, " " + tool.label); $("tools").append(label);
+  }
+}
+async function loadRuns() {
+  const list = $("runs"); list.replaceChildren();
+  for (const run of await api("/api/runs")) {
+    const item = document.createElement("li");
+    item.textContent = `${run.status} · ${run.model} · ${run.id.slice(0, 8)}`;
+    item.onclick = () => watch(run.id); list.append(item);
+  }
+}
+function watch(id) {
+  if (source) source.close();
+  $("out").textContent = ""; $("status").textContent = "run " + id.slice(0, 8);
+  source = new EventSource(`/api/langgraph/threads/${id}/runs/${id}/stream`);
+  source.addEventListener("values", (e) => {
+    const messages = JSON.parse(e.data).messages || [];
+    const last = messages[messages.length - 1];
+    if (last && typeof last.content === "string") $("out").textContent = last.content;
+  });
+  source.addEventListener("error", (e) => { if (e.data) $("status").textContent = JSON.parse(e.data).message; });
+  source.addEventListener("end", () => { source.close(); loadRuns(); $("status").textContent += " – finished"; });
+}
+$("form").onsubmit = async (event) => {
+  event.preventDefault();
+  const tools = [...$("tools").querySelectorAll("input:checked")].map((b) => b.value);
+  try {
+    const run = await api("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prompt: $("prompt").value, tools, mode: $("test").checked ? "test" : "live" }) });
+    watch(run.id); loadRuns();
+  } catch (error) { if (error.message !== "401") $("status").textContent = error.message; }
+};
+loadTools().then(loadRuns).catch(() => {});
+</script>
+</body>
+</html>
