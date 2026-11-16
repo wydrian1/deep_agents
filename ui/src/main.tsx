@@ -8,6 +8,7 @@ import './styles/agents-light.css';
 import './styles/run-stats.css';
 import './styles/schedule.css';
 import './styles/extra.css';
+import './styles/workflows.css';
 
 function Root() {
   // The service's APP_LANGUAGE is the default until the user picks a language themselves.

@@ -1,10 +1,17 @@
-import type { Agent, RunMetricsDetail, Run, Schedule, ServiceStatus, StudioGraph, ToolInfo, UploadedFile } from './types';
+import type { WorkflowSpec, WorkflowVersion } from './lib/workflows';
+import type {
+  Agent, MemoryEntry, MemorySummary, RunMetricsDetail, Run, Schedule, ServiceStatus, StudioGraph, ToolInfo, UploadedFile,
+  WorkflowOverview, WorkflowRunDetail,
+} from './types';
 
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** Structured details of a conflict (e.g. the knowledge base's current revision). */
+  current_revision: number | null;
+  constructor(message: string, status: number, currentRevision: number | null = null) {
     super(message);
     this.status = status;
+    this.current_revision = currentRevision;
   }
 }
 
@@ -12,6 +19,7 @@ export class ApiError extends Error {
 function detailOf(body: unknown, fallback: string): string {
   const detail = (body as { detail?: unknown } | null)?.detail;
   if (typeof detail === 'string') return detail;
+  if (detail && typeof detail === 'object' && !Array.isArray(detail) && typeof (detail as { message?: unknown }).message === 'string') return (detail as { message: string }).message;
   if (Array.isArray(detail)) {
     const parts = detail.map((item) => (item && typeof item === 'object' && 'msg' in item ? String((item as { msg: unknown }).msg) : '')).filter(Boolean);
     if (parts.length) return parts.join('; ');
@@ -28,7 +36,10 @@ async function request<T>(path: string, init?: RequestInit, fallback = 'Request 
   }
   if (response.status === 204) return undefined as T;
   const body = await response.json().catch(() => null);
-  if (!response.ok) throw new ApiError(detailOf(body, fallback), response.status);
+  if (!response.ok) {
+    const revision = (body as { detail?: { current_revision?: unknown } } | null)?.detail?.current_revision;
+    throw new ApiError(detailOf(body, fallback), response.status, typeof revision === 'number' ? revision : null);
+  }
   return body as T;
 }
 
@@ -69,6 +80,36 @@ export const api = {
   deleteAgent: (id: string) => request<void>('/api/agents/' + id, json('DELETE')),
   runAgent: (id: string) => request<Run>(`/api/agents/${id}/run`, json('POST')),
   logout: () => request<void>('/auth/logout', json('POST')),
+
+  // Knowledge base
+  memoryList: (prefix: string, deleted: boolean, after = '') =>
+    request<{ entries: MemorySummary[]; next: string | null }>(`/api/memory?prefix=${encodeURIComponent(prefix)}&deleted=${deleted}&after=${encodeURIComponent(after)}`),
+  memoryGet: (key: string, revision = 0) => request<{ entry: MemoryEntry | null }>(`/api/memory/${encodeURIComponent(key)}?revision=${revision}`),
+  memoryHistory: (key: string, before?: number) =>
+    request<{ versions: MemoryEntry[]; next: number | null }>(`/api/memory/${encodeURIComponent(key)}/history${before ? `?before=${before}` : ''}`),
+  memoryPut: (key: string, value: string, expectedRevision: number, requestId: string) =>
+    request<{ entry: MemoryEntry }>(`/api/memory/${encodeURIComponent(key)}`, json('PUT', { value, expected_revision: expectedRevision, request_id: requestId })),
+  memoryDelete: (key: string, expectedRevision: number, requestId: string) =>
+    request<unknown>(`/api/memory/${encodeURIComponent(key)}/delete`, json('POST', { expected_revision: expectedRevision, request_id: requestId })),
+
+  // Workflows
+  workflows: () => request<WorkflowOverview>('/api/workflows'),
+  workflowRun: (id: string) => request<WorkflowRunDetail>('/api/workflow-runs/' + id),
+  workflowVersions: (id: string) => request<{ versions: WorkflowVersion[] }>(`/api/workflows/${id}/versions`),
+  saveWorkflow: (input: { id?: string; name: string; expected_version: number; spec: WorkflowSpec }) =>
+    request<{ id: string; version: number }>('/api/workflows', json('POST', input)),
+  deleteWorkflow: (id: string) => request<void>('/api/workflows/' + id, json('DELETE')),
+  startWorkflow: (id: string, version: number, input: string, acceptedDataFlow: boolean) =>
+    request<{ id: string }>(`/api/workflows/${id}/start`, json('POST', { version, input, accepted_data_flow: acceptedDataFlow })),
+  scheduleWorkflow: (id: string, body: { schedule: Schedule; version: number; input: string; accepted_schedule: boolean; accepted_data_flow: boolean }) =>
+    request<{ ok: boolean; next_run: string }>(`/api/workflows/${id}/schedule`, json('PUT', body)),
+  removeWorkflowSchedule: (id: string) => request<void>(`/api/workflows/${id}/schedule`, json('DELETE')),
+  pauseWorkflowSchedule: (id: string) => request<{ ok: boolean }>(`/api/workflows/${id}/schedule/pause`, json('POST')),
+  rerunWorkflow: (id: string, acceptedDataFlow: boolean) => request<{ id: string }>(`/api/workflow-runs/${id}/rerun`, json('POST', { accepted_data_flow: acceptedDataFlow })),
+  cancelWorkflow: (id: string) => request<{ ok: boolean }>(`/api/workflow-runs/${id}/cancel`, json('POST')),
+  continueWorkflow: (id: string) => request<{ ok: boolean }>(`/api/workflow-runs/${id}/continue`, json('POST')),
+  approveWorkflow: (id: string, nodeId: string, approved: boolean) =>
+    request<{ ok: boolean }>(`/api/workflow-runs/${id}/approve`, json('POST', { node_id: nodeId, approved })),
 };
 
 /** Download URL of a private run output. */

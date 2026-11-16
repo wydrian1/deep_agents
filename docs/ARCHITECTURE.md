@@ -33,6 +33,8 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
 | `agents/supervisor.py` | One killable worker process per run: kills the process tree on cancel, timeout or shutdown; no automatic restart. `RUN_MODE=thread` runs in-process for tests. |
 | `agents/worker.py` | Worker entry point (`python -m deep_agents_app.agents.worker <run-id>`): runs one run, then exits. |
 | `saved/` | Saved agents: `schedule.py` (pure next-occurrence rules, DST-safe), `store.py` (CRUD, optimistic revisions, atomic claim + start + advance with `SKIP LOCKED`), `limits.py` (rate-limit pause), `scheduler.py` (ticker thread; every replica may run one). |
+| `memory/store.py`, `tools/memory.py`, `api/memory.py` | Shared knowledge base: versioned entries with exact-revision writes, logical delete, receipts for idempotency, hard limits; the two tool grants; the owner API. |
+| `workflows/` | `spec.py` (validated DAG), `store.py` (definitions, immutable versions with frozen agent snapshots, runs, schedules, lease recovery), `engine.py` (`Controller`: an outer LangGraph `StateGraph` on PostgresSaver that reserves ordinary agent runs and waits with `interrupt()`; `ControllerPool` threads in the API process), `scheduler.py`, `diagnostics.py`. `api/workflows.py` exposes it. |
 | `runs/outcome.py` | Failed-tool-result counting (four stop a run) and the business outcome status. |
 | `runs/metrics.py` | LangChain callback writing one content-free `llm_calls` row per model call (model, status, duration, tokens). Never alters or fails a run. |
 | `api/routes.py` | `/api/runs`, `/api/files`, `/api/tools`, artifact download, `/api/runs/{id}/metrics`, `/api/metrics/summary`. |
@@ -66,6 +68,15 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
 Differences from the earlier dashboard-embedded implementation, and why, are recorded in
 [DIVERGENCES.md](DIVERGENCES.md); keep it current when you change a deliberate difference.
 
+## Workflow engine in one paragraph
+
+A workflow run row holds the frozen spec and agents. A controller (thread in the API process) takes a 120 s
+lease, heartbeats, and drives a LangGraph graph with a Postgres checkpoint. An agent node
+reserves a normal run through `RunStore.reserve_in` (inheriting the workflow's deadline, unique per run and node)
+and pauses with an interrupt (`workflow_child`, `workflow_capacity`, `workflow_approval`); the controller resumes it
+when the child finishes. If the controller dies, the owner's explicit `continue` (allowed once the lease has expired, on any replica) resumes from the checkpoint; a step
+that crashed while launching is marked "uncertain" and never relaunched automatically.
+
 ## Not in Phase 1 (known gaps)
 
 - **Isolation is for stability, not security.** Each run is a separate worker process, so a hung or crashing run
@@ -76,9 +87,9 @@ Differences from the earlier dashboard-embedded implementation, and why, are rec
 - **Shell / Python / browser tools** are intentionally absent; they need a separate sandbox container.
   An `interrupt()`-based approval flow (human-in-the-loop) is not wired up.
 - **UI scope.** The Studio covers what the service supports. It uses `@langchain/langgraph-sdk` + assistant-ui
-  against `/api/langgraph/*`, which is why that API keeps the SDK's shape. Workflows, the knowledge base, the
-  daily summary and human approval of shell commands have no UI because they have no backend yet.
-- Workflows (graphs of saved agents), the daily summary, per-agent model selection UI.
+  against `/api/langgraph/*`, which is why that API keeps the SDK's shape. The daily summary and human approval
+  of shell commands have no UI because they have no backend yet.
+- The daily summary and a per-agent model selection UI.
 - **Metrics** record counts, latency and tokens only. There is no price table or spend calculation: the gateway
   (LiteLLM) already tracks spend per key/model, which is the source of truth for cost. Token counts depend on
   what the gateway reports; streamed calls need `stream_options.include_usage` (enabled by default here).

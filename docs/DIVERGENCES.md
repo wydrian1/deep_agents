@@ -43,15 +43,34 @@ weekly calendar and composer dialogs come from the earlier implementation. Diffe
 | Theme | Followed the dashboard theme | Own dark/light toggle (system preference by default) | No dashboard to inherit from |
 | Live thread | Loaded with the page | Loaded on demand (code split) | Main bundle 330 kB instead of 1.3 MB |
 | Time zone | Always Europe/Budapest | The service's `SCHEDULE_TIMEZONE` | Same reason as the scheduler |
-| Overview card | "Awaiting approval" | "Need attention" (failed or blocked recent runs) | There is no approval flow yet |
+| Overview card | "Awaiting approval" | "Need attention" (failed or blocked recent runs) | Approvals exist only inside workflows and are handled in the Workflows view |
 | File picking | NAS Files module, folder snapshots | Upload + choose among uploaded files | No NAS Files module here |
 | Tool names/descriptions | Tool catalog JSON | UI dictionaries (fallback: backend catalog text) | Localized |
 | Outcome sentence | "Business outcome: Business outcome not verified" | "Business outcome: not verified" | The old sentence repeated itself |
 | Report export | "Save to Files" action | Download only | There is no shared Files store to export into |
 | Account | Dashboard session | Login button / account name / log out when `AUTH_ENABLED=true` | The OAuth seam |
 
-Not in the UI because the service does not have the feature yet: workflows, the shared knowledge base, the daily
-summary, shell-command approval, and the Gmail/Calendar/private-GitHub/ChatGPT-login panels.
+Not in the UI because the service does not have the feature yet: the daily summary, shell-command approval, and the
+Gmail/Calendar/private-GitHub/ChatGPT-login panels.
+
+## Knowledge base and workflows: what differs from the previous implementation
+
+Rules ported unchanged: names/limits (200 names, 2,000 versions, 4 MiB, 12,000 characters), exact-revision writes,
+logical delete with history, restore = new revision, no inherited grants (an arrow grants nothing), write requires
+read; workflow limits (2-12 nodes, 8 agents, 24 edges, 4 in / 3 out), fixed text conditions only, immutable versions
+with frozen agents, agent-edit propagation in the same transaction, at most three active workflows, consents for data
+flow and recurring runs, schedules tied to one version, no automatic retry, "uncertain" launch after a crash.
+
+| Area | Previous | Now | Why |
+| --- | --- | --- | --- |
+| Workflow controller | Separate supervised process per workflow, SQLite checkpoint file | Thread in the API process, LangGraph on `PostgresSaver`, 120 s lease + heartbeat, owner-triggered `continue` | Standalone service, no extra process bridge; the lease and checkpoint keep a single controller per run |
+| Waiting | Polling retry loop with files | `interrupt()` (`workflow_child`, `workflow_capacity`, `workflow_approval`) resumed by the controller; poll interval `WORKFLOW_POLL_SECONDS` | The outer graph never blocks a thread inside a node |
+| Consent flags | Separate model/shell/data-flow consents | Data-flow consent (start, schedule) + recurring consent | There are no shell/model-switch tools here yet |
+| Memory write idempotency | Tool-call id | A digest of the call's own content (+ actor) | Replays after a checkpoint resume return the first result without relying on provider call ids |
+| Workflow errors | Localized text in the DB | Message keys (`key` or `key:cause`), localized when read | Same reason as for run errors |
+| Diagnostics | SQLite table, owner endpoint | Sanitized `workflow_diagnostics` table (<= 200, one per run), no HTTP endpoint | Content-free operator data stays in the database |
+| Knowledge API | Tool-style single endpoint | REST (`GET/PUT /api/memory/{key}`, `/history`, `/delete`), 409 carries `current_revision` | Plain HTTP semantics; same checks |
+| Outcome profiles | Parcel/Gmail-specific outcome rules | Generic business outcome status only | Those integrations do not exist here |
 
 ## Ported unchanged (do not "improve" without a reason)
 
@@ -69,7 +88,6 @@ limits; content-free metrics; scheduler heartbeat.
 
 ## Not ported yet
 
-Shared knowledge-base (memory) and notes tools, visual workflows, the daily summary, shell/Python/browser tools and
-the human-approval `interrupt()` flow, a separate parser process for documents (parsing is in-process), the Windows job
+The daily summary, shell/Python/browser tools and shell-command approval, a separate parser process for documents (parsing is in-process), the Windows job
 object (replaced by process-group kills and container limits), and everything that depended on the dashboard or a
 Google/GitHub OAuth app (Gmail, Calendar, private GitHub, push notifications, NAS health).
