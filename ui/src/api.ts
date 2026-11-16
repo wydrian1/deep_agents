@@ -1,3 +1,4 @@
+import type { DailySummary } from './lib/summary';
 import type { WorkflowSpec, WorkflowVersion } from './lib/workflows';
 import type {
   Agent, MemoryEntry, MemorySummary, RunMetricsDetail, Run, Schedule, ServiceStatus, StudioGraph, ToolInfo, UploadedFile,
@@ -91,6 +92,9 @@ export const api = {
     request<{ entry: MemoryEntry }>(`/api/memory/${encodeURIComponent(key)}`, json('PUT', { value, expected_revision: expectedRevision, request_id: requestId })),
   memoryDelete: (key: string, expectedRevision: number, requestId: string) =>
     request<unknown>(`/api/memory/${encodeURIComponent(key)}/delete`, json('POST', { expected_revision: expectedRevision, request_id: requestId })),
+
+  summary: () => request<DailySummary>('/api/summary'),
+  workflowDiagnostics: () => request<{ reports: { run_id: string; phase: string; created: string; body: unknown }[] }>('/api/workflow-diagnostics'),
 
   // Workflows
   workflows: () => request<WorkflowOverview>('/api/workflows'),

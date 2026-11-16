@@ -11,9 +11,18 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - agents-data:/data
-    # Each run is a worker process inside this container; cap the whole service.
+    # Each run is a worker process inside this container; cap and harden the whole service.
     pids_limit: 512
-    # mem_limit: 2g   # set a limit that fits your host (workers share it)
+    mem_limit: ${APP_MEM_LIMIT:-2g}   # workers share it; set what fits your host
+    cpus: ${APP_CPUS:-2}
+    read_only: true                    # only /data and /tmp are writable
+    tmpfs:
+      - /tmp:size=256m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    # Egress is NOT restricted here. For a real network boundary run the service on a network whose only route
+    # out is your egress proxy / the LiteLLM gateway and the database (see docs/ARCHITECTURE.md, "Isolation").
     restart: unless-stopped
 
   postgres:

@@ -36,9 +36,9 @@ def test_a_download_has_one_overall_deadline(monkeypatch, settings):
 
 
 def test_worker_environment_also_drops_provider_variables(settings):
-    base = {"OPENAI_API_KEY": "x", "openai_base_url": "http://evil", "ANTHROPIC_API_KEY": "y", "GOOGLE_API_KEY": "z", "NO_PROXY": "a", "KEEP": "1"}
+    base = {"OPENAI_API_KEY": "x", "openai_base_url": "http://evil", "ANTHROPIC_API_KEY": "y", "GOOGLE_API_KEY": "z", "NO_PROXY": "a", "PATH": "1"}
     env = worker_environment(settings, base)
-    assert env["KEEP"] == "1"
+    assert env["PATH"] == "1"
     assert not {k for k in env if k.upper().startswith(("OPENAI", "ANTHROPIC", "GOOGLE", "NO_PROXY"))}
 
 

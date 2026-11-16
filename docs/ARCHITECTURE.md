@@ -43,6 +43,7 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
 | `tools/` | Registry and tools. Web access only through `tools/web.py`. |
 | `api/graph_view.py` | Studio graph projection: the real topology plus normalized, bounded step events after a cursor. |
 | `ui/` (Vite + React) | The web UI. Built into `static/app` and served by `main.py` at `/` with a strict CSP; talks to the API only through `ui/src/api.ts`; strings in `ui/src/i18n`. |
+| `summary.py`, `api/summary.py` | The daily summary (`GET /api/summary`): content-free counts, causes and token totals for the current day in `SCHEDULE_TIMEZONE`. |
 | `i18n.py`, `prompts/`, `messages/` | Language packs (`APP_LANGUAGE`, per-run `language`). |
 
 ## Key decisions
@@ -74,22 +75,38 @@ A workflow run row holds the frozen spec and agents. A controller (thread in the
 lease, heartbeats, and drives a LangGraph graph with a Postgres checkpoint. An agent node
 reserves a normal run through `RunStore.reserve_in` (inheriting the workflow's deadline, unique per run and node)
 and pauses with an interrupt (`workflow_child`, `workflow_capacity`, `workflow_approval`); the controller resumes it
-when the child finishes. If the controller dies, the owner's explicit `continue` (allowed once the lease has expired, on any replica) resumes from the checkpoint; a step
+when the child finishes. If the controller dies, the scheduler tick of any replica relaunches it once the lease has expired (`WORKFLOW_AUTO_RESUME`, on by default; the owner's `continue` does the same on demand) and it resumes from the checkpoint; a step
 that crashed while launching is marked "uncertain" and never relaunched automatically.
+
+## Isolation
+
+Every run is a separate worker process, so a hung or crashing run is killed or failed without taking the API down
+and cancel/timeout are hard stops. On top of that the worker gets only what a run needs:
+
+| Layer | What it does |
+| --- | --- |
+| Environment | An allow-list of process variables (`PATH`, locale, CA bundle, ...) plus the settings a run needs (database, gateway, limits). The login secrets (`OAUTH_*`, `SESSION_*`, `COOKIE_*`), the scheduler switch, tracing, provider and proxy variables never reach it; `AUTH_ENABLED` is forced off in the worker. |
+| Files | A private scratch directory `DATA_DIR/work/<run id>` is the worker's cwd and `TMPDIR`; it is removed when the run ends. |
+| Resources (POSIX) | `WORKER_MEMORY_MB` (address space, off by default), `WORKER_FILE_MB` (largest file, 512), `WORKER_OPEN_FILES` (1024), no core dumps, `umask 077`, `PR_SET_NO_NEW_PRIVS`. Applied in the child between fork and exec, with everything looked up beforehand so the child never takes a lock another thread holds. |
+| Container | `docker-compose.yml`: read-only root file system (only `/data` and `/tmp`), all capabilities dropped, `no-new-privileges`, memory/CPU/pids limits, a non-root user. |
+
+What is **not** isolated: the worker still holds the database and gateway credentials (it writes events and calls
+the model), and it shares the container's network. Web tools are SSRF-guarded in the application, but that is not
+a network boundary. For one, run the service on a network whose only routes out are the LiteLLM gateway, the
+database and an egress proxy, and give the worker its own database role with access to the app schema only.
+Shell, Python and browser tools would additionally need their own sandbox container; they are not part of this
+service.
 
 ## Not in Phase 1 (known gaps)
 
-- **Isolation is for stability, not security.** Each run is a separate worker process, so a hung or crashing run
-  is killed/failed without taking the API down, and cancel/timeout are hard stops. But the worker has the same
-  secrets and network access as the API process, and document parsing is still not sandboxed. A restricted
-  worker container (no secrets beyond what the run needs, resource limits, own network policy) is the next step.
-  Worker start-up costs a few seconds (imports); a warm worker pool is a possible optimisation.
-- **Shell / Python / browser tools** are intentionally absent; they need a separate sandbox container.
-  An `interrupt()`-based approval flow (human-in-the-loop) is not wired up.
+- **Isolation is hardening, not a sandbox** (see the next section). Document parsing is still in the worker
+  process, and the network is the container's. Worker start-up costs a few seconds (imports); a warm worker pool
+  is a possible optimisation.
+- **Shell / Python / browser tools** are intentionally absent; they need a separate sandbox container, and a
+  human-approval flow for shell commands (workflows already have approval steps).
 - **UI scope.** The Studio covers what the service supports. It uses `@langchain/langgraph-sdk` + assistant-ui
-  against `/api/langgraph/*`, which is why that API keeps the SDK's shape. The daily summary and human approval
-  of shell commands have no UI because they have no backend yet.
-- The daily summary and a per-agent model selection UI.
+  against `/api/langgraph/*`, which is why that API keeps the SDK's shape.
+- A per-agent model selection UI.
 - **Metrics** record counts, latency and tokens only. There is no price table or spend calculation: the gateway
   (LiteLLM) already tracks spend per key/model, which is the source of truth for cost. Token counts depend on
   what the gateway reports; streamed calls need `stream_options.include_usage` (enabled by default here).

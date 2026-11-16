@@ -50,7 +50,7 @@ weekly calendar and composer dialogs come from the earlier implementation. Diffe
 | Report export | "Save to Files" action | Download only | There is no shared Files store to export into |
 | Account | Dashboard session | Login button / account name / log out when `AUTH_ENABLED=true` | The OAuth seam |
 
-Not in the UI because the service does not have the feature yet: the daily summary, shell-command approval, and the
+Not in the UI because the service does not have the feature yet: shell-command approval, and the
 Gmail/Calendar/private-GitHub/ChatGPT-login panels.
 
 ## Knowledge base and workflows: what differs from the previous implementation
@@ -71,6 +71,19 @@ flow and recurring runs, schedules tied to one version, no automatic retry, "unc
 | Diagnostics | SQLite table, owner endpoint | Sanitized `workflow_diagnostics` table (<= 200, one per run), no HTTP endpoint | Content-free operator data stays in the database |
 | Knowledge API | Tool-style single endpoint | REST (`GET/PUT /api/memory/{key}`, `/history`, `/delete`), 409 carries `current_revision` | Plain HTTP semantics; same checks |
 | Outcome profiles | Parcel/Gmail-specific outcome rules | Generic business outcome status only | Those integrations do not exist here |
+| Controller recovery | Owner pressed "continue" after a lease expired | The scheduler tick relaunches expired controllers itself (`WORKFLOW_AUTO_RESUME`, default on; a never-claimed run after 60 s); `continue` still works | An API restart no longer leaves a workflow idle until someone notices; a live lease is never taken over and finished steps are never relaunched |
+| Diagnostics | No HTTP endpoint | `GET /api/workflow-diagnostics` (owner API, content-free bodies) | The reports hold only error classes and code locations, so they are safe to read in the UI/CLI |
+
+## Daily summary, worker isolation: what differs
+
+| Area | Previous | Now | Why |
+| --- | --- | --- | --- |
+| Summary day | Europe/Budapest calendar day | Calendar day in `SCHEDULE_TIMEZONE` | Same reason as the scheduler |
+| Summary problems | Failed or blocked/error workflows | The same, but a workflow the owner **cancelled** is not a problem | `cancel` stamps the run with outcome `error`, which made every deliberate cancel look like a failure |
+| Summary shape | camelCase, epoch seconds | snake_case, ISO timestamps; the workflow's stored error key is localized when the agent gave no reason | Consistent with the rest of the API |
+| Worker environment | The parent's environment minus tracing/provider/proxy variables | An allow-list plus the settings a run needs; no `OAUTH_*`/`SESSION_*`/`COOKIE_*`, `AUTH_ENABLED` and the scheduler off | A worker never serves a request, so it should not hold the login secrets |
+| Worker files | cwd = `DATA_DIR` | cwd and `TMPDIR` = a private `DATA_DIR/work/<run id>`, removed afterwards | Nothing a run writes is shared with another run |
+| Worker limits | Windows job object (memory, process count) | POSIX rlimits (address space, file size, descriptors), no core dumps, `umask 077`, no-new-privileges, plus the container limits in compose | The service runs in a Linux container; the job object is Windows only |
 
 ## Ported unchanged (do not "improve" without a reason)
 
@@ -88,6 +101,6 @@ limits; content-free metrics; scheduler heartbeat.
 
 ## Not ported yet
 
-The daily summary, shell/Python/browser tools and shell-command approval, a separate parser process for documents (parsing is in-process), the Windows job
+Shell/Python/browser tools and shell-command approval, a separate parser process for documents (parsing is in-process), the Windows job
 object (replaced by process-group kills and container limits), and everything that depended on the dashboard or a
 Google/GitHub OAuth app (Gmail, Calendar, private GitHub, push notifications, NAS health).

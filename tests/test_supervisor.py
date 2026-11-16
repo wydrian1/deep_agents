@@ -47,12 +47,53 @@ def test_settings_round_trip_through_the_environment(settings):
     assert settings.to_env()["LLM_API_KEY"] == "test-key"
 
 
-def test_worker_environment_drops_tracing_and_proxies_but_keeps_settings(settings):
-    base = {"PATH": "/bin", "LANGSMITH_API_KEY": "x", "langchain_tracing_v2": "true", "HTTPS_PROXY": "http://p", "OTHER": "1"}
+def test_worker_environment_is_an_allow_list_and_keeps_the_settings_a_worker_needs(settings):
+    base = {"PATH": "/bin", "LC_ALL": "C", "LANGSMITH_API_KEY": "x", "langchain_tracing_v2": "true", "HTTPS_PROXY": "http://p", "OTHER": "1", "AWS_SECRET_ACCESS_KEY": "s"}
     env = worker_environment(settings, base)
-    assert env["PATH"] == "/bin" and env["OTHER"] == "1"
-    assert "LANGSMITH_API_KEY" not in env and "langchain_tracing_v2" not in env and "HTTPS_PROXY" not in env
+    assert env["PATH"] == "/bin" and env["LC_ALL"] == "C"
+    assert not {"OTHER", "AWS_SECRET_ACCESS_KEY", "LANGSMITH_API_KEY", "langchain_tracing_v2", "HTTPS_PROXY"} & set(env)
     assert env["LANGSMITH_TRACING"] == "false" and env["DATABASE_SCHEMA"] == settings.database_schema
+    assert env["LLM_API_KEY"] == "test-key" and env["DATABASE_URL"] == settings.database_url  # what a run really needs
+
+
+def test_worker_environment_never_carries_the_login_secrets(settings):
+    secret = settings.model_copy(update={
+        "auth_enabled": True, "oauth_client_secret": "client-secret-value", "session_secret": "s" * 40, "oauth_client_id": "id",
+    })
+    env = worker_environment(secret, {"PATH": "/bin"})
+    assert env["AUTH_ENABLED"] == "false" and env["SCHEDULER_ENABLED"] == "false"
+    assert not [k for k in env if k.startswith(("OAUTH_", "SESSION_", "COOKIE_"))]
+    assert "client-secret-value" not in env.values() and "s" * 40 not in env.values()
+    rebuilt = Settings(_env_file=None, **{k.lower(): v for k, v in env.items() if k.lower() in Settings.model_fields})  # type: ignore[arg-type]
+    assert rebuilt.auth_enabled is False  # a worker's settings are valid without the login configuration
+
+
+def test_worker_environment_points_temp_files_at_the_private_scratch_directory(settings, tmp_path):
+    env = worker_environment(settings, {"PATH": "/bin", "TMPDIR": "/tmp"}, scratch=tmp_path)
+    assert env["TMPDIR"] == env["TEMP"] == env["TMP"] == str(tmp_path)
+
+
+def test_a_worker_runs_in_a_private_scratch_directory_that_is_removed(settings, store, children):
+    run_id = reserve(store)
+    seen = settings.data_dir / "work" / run_id
+    script = "import os,sys; open('probe.txt','w').write(os.getcwd()); sys.exit(1)"
+    Supervisor(settings, store, poll_seconds=0.05).supervise(run_id, [sys.executable, "-c", script])
+    assert not seen.exists()  # nothing a run wrote there outlives it
+    assert (settings.data_dir / "work").is_dir()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX resource limits")
+def test_posix_workers_get_resource_limits_no_core_dumps_and_a_private_umask(settings, store, children):
+    run_id = reserve(store)
+    limited = settings.model_copy(update={"worker_file_mb": 7, "worker_open_files": 300})
+    out = settings.data_dir / "limits.txt"
+    script = (
+        "import resource,os,sys;"
+        f"open({str(out)!r},'w').write(repr((resource.getrlimit(resource.RLIMIT_FSIZE)[0],resource.getrlimit(resource.RLIMIT_NOFILE)[0],"
+        "resource.getrlimit(resource.RLIMIT_CORE)[0],os.umask(0o022))))"
+    )
+    Supervisor(limited, store, poll_seconds=0.05).supervise(run_id, [sys.executable, "-c", script])
+    assert out.read_text() == repr((7 * 1024 * 1024, 300, 0, 0o077))
 
 
 def test_worker_rejects_bad_arguments(capsys):
