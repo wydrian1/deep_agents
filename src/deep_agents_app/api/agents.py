@@ -14,6 +14,8 @@ from ..llm.gateway import ModelNotConfigured
 from ..runs.store import Busy, DiskLow
 from ..saved.schedule import Schedule
 from ..saved.store import AgentLimit, AgentNotFound, FilesMissing, RevisionConflict, SavedAgentStore
+from ..workflows.spec import WorkflowRejected
+from ..workflows.store import MAX_AGENT_PROMPT
 from .routes import RunRequest, normalize_run_request, public_run
 
 _ID = re.compile(r"^[a-f0-9-]{36}$")
@@ -62,6 +64,7 @@ def public_agent(agent: dict[str, Any]) -> dict[str, Any]:
         "last_run_id": agent["last_run_id"],
         "last_error": message(agent["last_error"], config["language"]) if agent["last_error"] else "",
         "revision": agent["revision"], "created": agent["created"].isoformat(), "updated": agent["updated"].isoformat(),
+        **({"updated_workflows": agent["updated_workflows"]} if "updated_workflows" in agent else {}),
     }
 
 
@@ -134,6 +137,8 @@ def router() -> APIRouter:
             raise HTTPException(404, message("agent_not_found", config["language"])) from None
         except RevisionConflict:
             raise HTTPException(409, message("agent_conflict", config["language"])) from None
+        except WorkflowRejected as error:
+            raise HTTPException(422, message(error.key, config["language"], limit=MAX_AGENT_PROMPT)) from None
         return public_agent(agent)
 
     @api.delete("/{agent_id}", status_code=204)

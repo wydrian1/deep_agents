@@ -116,7 +116,13 @@ class SavedAgentStore:
                     last_error="", revision=row["revision"] + 1, updated=moment,
                 )
             )
-        return self.get(agent_id)  # type: ignore[return-value]
+            # Workflows that use this agent get a new version in the SAME transaction (all or nothing).
+            from ..workflows.store import WorkflowStore
+
+            updated_workflows = WorkflowStore.propagate_agent_edit(db, agent_id, name, config)
+        agent = self.get(agent_id)
+        assert agent is not None
+        return {**agent, "updated_workflows": updated_workflows}
 
     def set_enabled(self, agent_id: str, enabled: bool) -> dict[str, Any]:
         """Turn the saved schedule on or off without editing the agent (the previous system's ``enable_saved``).

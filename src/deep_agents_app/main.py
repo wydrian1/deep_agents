@@ -15,6 +15,8 @@ from . import __version__
 from .agents.supervisor import make_executor
 from .api import agents as agents_api
 from .api import langgraph, routes
+from .api import memory as memory_api
+from .api import workflows as workflows_api
 from .api.limits import BodyLimitMiddleware
 from .auth import oauth
 from .config import Settings, get_settings
@@ -23,6 +25,9 @@ from .db.migrate import migrate
 from .runs.store import RunStore
 from .saved.scheduler import Scheduler
 from .saved.store import SavedAgentStore
+from .workflows.engine import ControllerPool
+from .workflows.scheduler import run_due_workflows
+from .workflows.store import WorkflowStore
 
 log = logging.getLogger(__name__)
 # The built web UI (ui/ -> npm run build copies it here; the Docker image does this for you).
@@ -47,15 +52,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store = RunStore(engine, settings)
         executor = make_executor(settings, store)
         agents = SavedAgentStore(store, settings)
-        scheduler = Scheduler(agents, executor.submit, settings.scheduler_interval_seconds)
+        workflows = WorkflowStore(store, settings)
+        controllers = ControllerPool(settings, workflows, executor.submit)
+        scheduler = Scheduler(
+            agents, executor.submit, settings.scheduler_interval_seconds,
+            extra=[lambda moment: run_due_workflows(workflows, controllers, moment)],
+        )
         app.state.engine, app.state.store, app.state.executor = engine, store, executor
         app.state.agents, app.state.scheduler = agents, scheduler
+        app.state.workflows, app.state.controllers = workflows, controllers
         if not settings.auth_enabled:
             log.warning("AUTH_ENABLED=false: the service has NO login or access protection.")
         if settings.scheduler_enabled:
             scheduler.start()
         yield
         scheduler.stop()
+        controllers.shutdown()
         executor.shutdown()
         engine.dispose()
 
@@ -95,6 +107,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(BodyLimitMiddleware, language=settings.app_language)
     app.include_router(routes.router())
     app.include_router(agents_api.router())
+    app.include_router(memory_api.router())
+    app.include_router(workflows_api.router())
     app.include_router(langgraph.router())
     if settings.auth_enabled:
         app.include_router(oauth.router(settings))

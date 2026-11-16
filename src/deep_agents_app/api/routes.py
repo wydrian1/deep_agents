@@ -78,7 +78,7 @@ def public_run(run: dict[str, Any], full: bool = False) -> dict[str, Any]:
         "created": run["created"].isoformat(), "updated": run["updated"].isoformat(),
         "outcome_status": run.get("outcome_status", "unknown"),
     }
-    for key in ("metrics", "tool_calls", "artifacts"):  # present in listings and in the detail view
+    for key in ("metrics", "tool_calls", "artifacts", "workflow"):  # present in listings and in the detail view
         if key in run:
             data[key] = run[key]
     data["prompt"] = run["prompt"]  # the UI titles runs by their prompt
@@ -136,8 +136,10 @@ def router() -> APIRouter:
 
     @api.get("/runs")
     def list_runs(request: Request) -> list[dict[str, Any]]:
-        """The active and most recent runs with metrics summary, tool-call count and outputs."""
-        return [public_run(r) for r in request.app.state.store.list_runs()]
+        """The active and most recent runs with metrics summary, tool-call count, outputs and workflow origin."""
+        rows = request.app.state.store.list_runs()
+        origins = request.app.state.workflows.origins([r["id"] for r in rows if r.get("workflow_run_id")])
+        return [public_run({**r, "workflow": origins.get(r["id"])}) for r in rows]
 
     @api.get("/runs/{run_id}")
     def get_run(run_id: str, request: Request) -> dict[str, Any]:
@@ -146,7 +148,8 @@ def router() -> APIRouter:
         if not run:
             raise HTTPException(404, message("run_not_found", request.app.state.settings.app_language))
         summary = store.summarize([run]).get(run_id)
-        extra = {"artifacts": store.list_artifacts(run_id), "metrics": summary, "tool_calls": summary["tool_calls"] if summary else 0}
+        origin = request.app.state.workflows.origins([run_id]).get(run_id)
+        extra = {"artifacts": store.list_artifacts(run_id), "metrics": summary, "tool_calls": summary["tool_calls"] if summary else 0, "workflow": origin}
         return public_run(run | extra, full=True)
 
     @api.get("/status")

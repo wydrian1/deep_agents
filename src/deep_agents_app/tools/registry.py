@@ -62,7 +62,7 @@ def register_tool(
 
 
 def load_builtin_tools() -> None:
-    from . import documents, github, reports, web  # noqa: F401  (import registers the tools)
+    from . import documents, github, memory, reports, web  # noqa: F401  (import registers the tools)
 
 
 def catalog() -> list[dict[str, Any]]:

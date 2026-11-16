@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     schedule_timezone: str = "UTC"
     # Scheduled starts pause this long after a rate-limited model call (0 = never pause). See saved/limits.py.
     rate_limit_cooldown_seconds: int = 3600
+    # How often a workflow controller checks its checkpoint and child runs (seconds).
+    workflow_poll_seconds: float = 1.0
 
     # Optional OAuth 2.0 / OIDC login. OFF by default: with AUTH_ENABLED=false the service
     # has no login and no access protection at all (see auth/__init__.py).
