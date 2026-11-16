@@ -10,3 +10,7 @@ __pycache__
 .mypy_cache
 .ruff_cache
 tests
+ui/node_modules
+ui/dist
+ui/coverage
+src/deep_agents_app/static/app

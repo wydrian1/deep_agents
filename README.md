@@ -27,7 +27,11 @@ It is a development foundation, not a finished product (see [docs/ARCHITECTURE.m
 - Safety nets: a run stops after four failed tool results; every run gets a business outcome status
   (`success|noop|blocked|error|unknown`); JSON bodies are limited to 18,000 bytes and unknown fields are rejected.
 - `GET /api/status`: limits, scheduler heartbeat and an active rate-limit pause.
-- A LangGraph-SDK-compatible read API and a minimal developer page at `/`.
+- **Web UI ("Studio")** at `/`, taken over from the earlier dashboard-embedded implementation: runs with search and
+  filters, the real LangGraph graph with an inspector and an event log, live messages (assistant-ui over the
+  LangGraph SDK), report and statistics views, private run outputs, the agent library with templates, a weekly
+  schedule calendar, and the new-task/agent dialog. Dark and light theme, English and Hungarian, phone-friendly.
+- A LangGraph-SDK-compatible read API (the UI uses it).
 - Optional OAuth 2.0 (authorization code + PKCE) login, off by default.
 
 ## Run it
@@ -72,6 +76,20 @@ Set `AUTH_ENABLED=true` and provide `OAUTH_AUTHORIZE_URL`, `OAUTH_TOKEN_URL`, `O
 `OAUTH_ALLOWED_EMAILS` (comma separated; nobody else may log in) and a random `SESSION_SECRET` (≥ 32 chars).
 The service refuses to start with an incomplete configuration. Serve it over HTTPS (keep `COOKIE_SECURE=true`).
 `/api/*` then needs a session; `/healthz` and the static page stay open.
+
+## Web UI development
+
+The UI is a Vite + React app in [ui/](ui). The Docker image builds it; for development:
+
+```bash
+cd ui
+npm ci
+npm run dev          # http://localhost:5173, proxies /api and /auth to http://127.0.0.1:8000
+npm run typecheck && npm test
+npm run build        # writes the production bundle into src/deep_agents_app/static/app (served at "/")
+```
+
+Without a build, `/` shows a short notice and the API stays available at `/api/docs`.
 
 ## Development
 

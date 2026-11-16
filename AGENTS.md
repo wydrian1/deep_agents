@@ -16,6 +16,8 @@ This repository is public. Treat everything committed here as published.
      database tests were skipped does not count.
    - `docker build -t deep-agents-app:test .` for any change that touches dependencies, the Dockerfile,
      compose, or application startup.
+   - For anything under `ui/`, in `ui/`: `npm run typecheck`, `npm test` and `npm run build`; for visible
+     changes also look at the result in a browser (dark and light theme, `hu` and `en`, a phone-width viewport).
 5. Review the diff and the exact staged files for secrets and unrelated changes, then commit, push the
    branch and open a PR against `main` with a short summary and the real commands/results you ran.
 6. Merge only when the owner asks. Never push directly to `main`, force-push or delete branches without
@@ -38,5 +40,8 @@ This repository is public. Treat everything committed here as published.
   `tools/web.py` (SSRF protection); do not add a second HTTP path to the open internet.
 - No automatic retries at run, tool or scheduler level; at most one model-request retry before a response starts.
 - Keep user-facing text out of code: prompts live in `prompts/<lang>.md`, messages in `messages/<lang>.json`.
+  In the web UI every string goes through `ui/src/i18n` (`en.ts` is the reference, `hu.ts` must have the same keys
+  and placeholders; a test enforces it). The UI must not need inline scripts or external hosts (it is served with a
+  strict CSP), must never receive or show a secret, and talks to the API only through `ui/src/api.ts`.
 - Deployment and production data are out of scope for source changes; do not add deployment secrets or
   environment-specific hosts to the repository.

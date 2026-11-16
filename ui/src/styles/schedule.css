@@ -1,0 +1,5 @@
+/* Scheduled workflows in the weekly calendar: marked with an icon and an accent edge, not by colour alone. */
+.studio-day-items .studio-day-workflow{border-left:2px solid var(--studio-violet,#9a8cff)}
+.studio-day-items .studio-day-workflow svg{flex:none;vertical-align:-1px;margin-right:3px}
+/* Hourly schedule: a visible quota warning next to the consent checkbox. */
+.studio-consent .studio-schedule-warning{display:block;margin-top:8px;padding:8px 10px;font-style:normal;font-size:12px;line-height:1.55;color:var(--text);border-left:3px solid var(--studio-amber,#d9a441);background:color-mix(in srgb,var(--studio-amber,#d9a441) 12%,transparent);border-radius:0 6px 6px 0}

@@ -189,6 +189,30 @@ class RunStore:
             ).mappings()
             return [dict(row) for row in rows]
 
+    def trace_rows(self, run_id: str, cursor: int, limit: int) -> list[dict[str, Any]]:
+        """Step events (``messages``/``updates``, with or without a subgraph namespace) after the cursor."""
+        step_event = (
+            (run_events.c.event == "messages") | (run_events.c.event == "updates")
+            | run_events.c.event.like("messages|%") | run_events.c.event.like("updates|%")
+        )
+        with self.engine.connect() as db:
+            rows = db.execute(
+                select(run_events.c.id, run_events.c.event, run_events.c.data)
+                .where(run_events.c.run_id == run_id, run_events.c.id > cursor, step_event)
+                .order_by(run_events.c.id)
+                .limit(limit)
+            ).mappings()
+            return [dict(row) for row in rows]
+
+    def list_input_files(self, limit: int = 500) -> list[dict[str, Any]]:
+        with self.engine.connect() as db:
+            rows = db.execute(
+                select(input_files.c.id, input_files.c.name, input_files.c.size)
+                .order_by(input_files.c.created.desc())
+                .limit(limit)
+            ).mappings()
+            return [dict(row) for row in rows]
+
     def last_event_id(self, run_id: str) -> int:
         with self.engine.connect() as db:
             return db.execute(

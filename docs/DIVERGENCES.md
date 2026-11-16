@@ -31,6 +31,28 @@ it here.** This file is that record. If you change one of these decisions, updat
 | Auth | Dashboard session | `current_principal` seam; optional OAuth 2.0 + PKCE login, **off** by default | Standalone; login can be enabled later without touching endpoints |
 | Run prompt limit | 4,000 characters | 4,000 by default, `MAX_PROMPT_CHARS` to change | Same default, tunable |
 
+## Web UI: taken over, with these deliberate differences
+
+The Studio design, class names, CSS (dark and light), graph/inspector/event views, run statistics, agent library,
+weekly calendar and composer dialogs come from the earlier implementation. Differences:
+
+| Area | Previous | Now | Why |
+| --- | --- | --- | --- |
+| Framework | Next.js page inside the dashboard shell | Vite + React single-page app served by the API (`ui/`) | Standalone; no dashboard, no server-side rendering needed |
+| Language | Hungarian only | English and Hungarian (`ui/src/i18n`), default from `APP_LANGUAGE`, switchable in the header | Configurable language is a requirement of the standalone service |
+| Theme | Followed the dashboard theme | Own dark/light toggle (system preference by default) | No dashboard to inherit from |
+| Live thread | Loaded with the page | Loaded on demand (code split) | Main bundle 330 kB instead of 1.3 MB |
+| Time zone | Always Europe/Budapest | The service's `SCHEDULE_TIMEZONE` | Same reason as the scheduler |
+| Overview card | "Awaiting approval" | "Need attention" (failed or blocked recent runs) | There is no approval flow yet |
+| File picking | NAS Files module, folder snapshots | Upload + choose among uploaded files | No NAS Files module here |
+| Tool names/descriptions | Tool catalog JSON | UI dictionaries (fallback: backend catalog text) | Localized |
+| Outcome sentence | "Business outcome: Business outcome not verified" | "Business outcome: not verified" | The old sentence repeated itself |
+| Report export | "Save to Files" action | Download only | There is no shared Files store to export into |
+| Account | Dashboard session | Login button / account name / log out when `AUTH_ENABLED=true` | The OAuth seam |
+
+Not in the UI because the service does not have the feature yet: workflows, the shared knowledge base, the daily
+summary, shell-command approval, and the Gmail/Calendar/private-GitHub/ChatGPT-login panels.
+
 ## Ported unchanged (do not "improve" without a reason)
 
 Concurrency 3 and 3,600 s run limit; no automatic retry at run/tool/scheduler level and at most one model-request

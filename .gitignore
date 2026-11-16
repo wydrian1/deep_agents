@@ -34,3 +34,10 @@ htmlcov/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# Built web UI (produced by ui/ npm run build and by the Docker image)
+src/deep_agents_app/static/app/
+ui/node_modules/
+ui/dist/
+ui/coverage/
+

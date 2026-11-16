@@ -39,6 +39,8 @@ client ──HTTP──▶ FastAPI (api/) ──▶ RunStore (Postgres: runs, ru
 | `api/langgraph.py` | Narrow LangGraph-SDK-compatible read API (thread state, SSE join, cancel). |
 | `auth/` | `current_principal` seam; optional OAuth 2.0 + PKCE login (off by default). |
 | `tools/` | Registry and tools. Web access only through `tools/web.py`. |
+| `api/graph_view.py` | Studio graph projection: the real topology plus normalized, bounded step events after a cursor. |
+| `ui/` (Vite + React) | The web UI. Built into `static/app` and served by `main.py` at `/` with a strict CSP; talks to the API only through `ui/src/api.ts`; strings in `ui/src/i18n`. |
 | `i18n.py`, `prompts/`, `messages/` | Language packs (`APP_LANGUAGE`, per-run `language`). |
 
 ## Key decisions
@@ -73,8 +75,9 @@ Differences from the earlier dashboard-embedded implementation, and why, are rec
   Worker start-up costs a few seconds (imports); a warm worker pool is a possible optimisation.
 - **Shell / Python / browser tools** are intentionally absent; they need a separate sandbox container.
   An `interrupt()`-based approval flow (human-in-the-loop) is not wired up.
-- **No UI beyond a developer page.** The planned UI uses `@langchain/langgraph-sdk` + assistant-ui against
-  `/api/langgraph/*`, which is why that API keeps the SDK's shape.
+- **UI scope.** The Studio covers what the service supports. It uses `@langchain/langgraph-sdk` + assistant-ui
+  against `/api/langgraph/*`, which is why that API keeps the SDK's shape. Workflows, the knowledge base, the
+  daily summary and human approval of shell commands have no UI because they have no backend yet.
 - Workflows (graphs of saved agents), the daily summary, per-agent model selection UI.
 - **Metrics** record counts, latency and tokens only. There is no price table or spend calculation: the gateway
   (LiteLLM) already tracks spend per key/model, which is the source of truth for cost. Token counts depend on

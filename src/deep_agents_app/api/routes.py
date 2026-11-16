@@ -81,8 +81,9 @@ def public_run(run: dict[str, Any], full: bool = False) -> dict[str, Any]:
     for key in ("metrics", "tool_calls", "artifacts"):  # present in listings and in the detail view
         if key in run:
             data[key] = run[key]
+    data["prompt"] = run["prompt"]  # the UI titles runs by their prompt
     if full:
-        data |= {"prompt": run["prompt"], "result": run["result"], "language": run["language"], "files": run["files"]}
+        data |= {"result": run["result"], "language": run["language"], "files": run["files"]}
     return data
 
 
@@ -98,6 +99,11 @@ def router() -> APIRouter:
     @api.get("/tools")
     def tools() -> list[dict[str, Any]]:
         return catalog()
+
+    @api.get("/files")
+    def list_files(request: Request) -> list[dict[str, Any]]:
+        """The most recent uploaded files (id, name, size), for attaching to a run."""
+        return list(request.app.state.store.list_input_files())
 
     @api.post("/files", status_code=201)
     async def upload(request: Request, name: str) -> dict[str, Any]:
@@ -152,6 +158,7 @@ def router() -> APIRouter:
         return {
             "model": settings.default_model or None, "language": settings.app_language,
             "max_concurrent_runs": settings.max_concurrent_runs, "run_timeout_seconds": settings.run_timeout_seconds,
+            "max_prompt_chars": settings.max_prompt_chars,
             "active_runs": state.store.active_count(), "auth_enabled": settings.auth_enabled,
             "scheduler_enabled": settings.scheduler_enabled, "schedule_timezone": settings.schedule_timezone,
             "scheduler_heartbeat": snapshot["heartbeat"].isoformat() if snapshot["heartbeat"] else None,

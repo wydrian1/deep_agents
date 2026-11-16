@@ -1,3 +1,12 @@
+# --- Stage 1: build the web UI (Vite writes it to /src/deep_agents_app/static/app, see ui/vite.config.ts) ---
+FROM node:24-alpine AS ui
+WORKDIR /ui
+COPY ui/package.json ui/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY ui/ ./
+RUN npm run build
+
+# --- Stage 2: the Python service, with the built UI inside the package ---
 FROM python:3.13-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -8,6 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
+COPY --from=ui /src/deep_agents_app/static/app ./src/deep_agents_app/static/app
 RUN pip install .
 
 RUN useradd --system --create-home --uid 10001 agents \

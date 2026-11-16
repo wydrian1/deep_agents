@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from importlib import resources
+from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse, Response
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import text
 
 from . import __version__
@@ -25,6 +25,14 @@ from .saved.scheduler import Scheduler
 from .saved.store import SavedAgentStore
 
 log = logging.getLogger(__name__)
+# The built web UI (ui/ -> npm run build copies it here; the Docker image does this for you).
+UI_DIR = Path(__file__).resolve().parent / "static" / "app"
+FALLBACK_PAGE = (
+    "<!doctype html><meta charset=utf-8><title>Deep Agents</title>"
+    "<h1>Deep Agents</h1><p>The web UI is not built in this installation. "
+    "Run <code>npm run build</code> in <code>ui/</code>, or use the Docker image. "
+    "The API is available: <a href=/api/docs>/api/docs</a>.</p>"
+)
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -63,15 +71,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return JSONResponse({"status": "unavailable", "database": False}, status_code=503)
         return JSONResponse({"status": "ok", "database": True, "auth": settings.auth_enabled})
 
+    ui_headers = {
+        "Content-Security-Policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+    }
+
     @app.get("/", include_in_schema=False)
     def index() -> Response:
-        page = resources.files(__package__).joinpath("static", "index.html").read_text(encoding="utf-8")
-        return Response(
-            page,
-            media_type="text/html",
-            headers={"Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'", "X-Content-Type-Options": "nosniff"},
-        )
+        page = UI_DIR / "index.html"
+        if not page.is_file():
+            return Response(FALLBACK_PAGE, media_type="text/html", headers=ui_headers)
+        return FileResponse(page, media_type="text/html", headers={**ui_headers, "Cache-Control": "no-cache"})
 
+    @app.get("/assets/{name:path}", include_in_schema=False)
+    def asset(name: str) -> Response:
+        root = (UI_DIR / "assets").resolve()
+        path = (root / name).resolve()
+        if not path.is_relative_to(root) or not path.is_file():
+            raise HTTPException(404, "not found")
+        # Vite emits content-hashed file names, so assets can be cached forever.
+        return FileResponse(path, headers={"Cache-Control": "public, max-age=31536000, immutable", "X-Content-Type-Options": "nosniff"})
     app.add_middleware(BodyLimitMiddleware, language=settings.app_language)
     app.include_router(routes.router())
     app.include_router(agents_api.router())
