@@ -3,7 +3,8 @@ import { api, ApiError } from './api';
 import AgentLibrary from './components/AgentLibrary';
 import Composer, { type ComposerHandle, type ComposerResult } from './components/Composer';
 import Icon from './components/Icon';
-
+import KnowledgePanel from './components/KnowledgePanel';
+import WorkflowPanel from './components/WorkflowPanel';
 import RunArtifacts from './components/RunArtifacts';
 import RunGraph from './components/RunGraph';
 import RunStats from './components/RunStats';
@@ -15,12 +16,12 @@ import { nextScheduledRun } from './lib/schedule';
 import { toolLabelById } from './lib/tools';
 import type { AgentTemplate } from './lib/templates';
 import { useTheme } from './theme';
-import type { Agent, Run, ServiceStatus, ToolInfo, UploadedFile } from './types';
+import type { Agent, Run, ServiceStatus, ToolInfo, UploadedFile, WorkflowOverview } from './types';
 
 // The live thread pulls in assistant-ui and the LangGraph SDK (most of the bundle): load it on demand.
 const LiveThread = lazy(() => import('./components/LiveThread'));
 
-type View = 'workspace' | 'library' | 'schedules';
+type View = 'workspace' | 'library' | 'schedules' | 'knowledge' | 'workflows';
 type Pane = 'graph' | 'conversation' | 'events';
 type Snapshot = { runs: Run[]; agents: Agent[]; status: ServiceStatus };
 
@@ -44,6 +45,8 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
   const [filter, setFilter] = useState('all');
   const [railTab, setRailTab] = useState<'runs' | 'agents'>('runs');
   const [account, setAccount] = useState('');
+  const [workflows, setWorkflows] = useState<WorkflowOverview | null>(null);
+  const [workflowRun, setWorkflowRun] = useState('');
   const composer = useRef<ComposerHandle>(null);
   const runtime = useRef<HTMLDialogElement>(null);
 
@@ -53,6 +56,7 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
       setData({ runs, agents, status });
       setStatusError('');
       setNeedsLogin(false);
+      api.workflows().then(setWorkflows).catch(() => undefined);
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 401) setNeedsLogin(true);
       else setStatusError(reason instanceof Error ? reason.message : t('app.connectionError'));
@@ -87,7 +91,10 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
   const active = runs.filter((item) => item.status === 'running').length;
   const listed = selected ? runs.find((item) => item.id === selected) : runs[0];
   const run: Run | undefined = listed ? (detail?.id === listed.id ? { ...listed, ...detail, metrics: listed.metrics ?? detail.metrics } : listed) : undefined;
-  const next = nextScheduledRun(agents);
+  const next = nextScheduledRun([
+    ...agents,
+    ...(workflows?.definitions ?? []).filter((item) => item.schedule).map((item) => ({ name: item.name, enabled: !!item.schedule?.enabled, next_run: item.schedule?.next_run ?? null })),
+  ]);
   const schedulerReady = !!status?.scheduler_heartbeat && Date.now() - Date.parse(status.scheduler_heartbeat) < 90_000;
   const attention = runs.filter((item) => item.status === 'failed' || outcomeBlocked(item.outcome_status)).length;
   const lower = (value: string) => value.toLocaleLowerCase(lang);
@@ -138,7 +145,8 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
     if (result.kind === 'run') openRun(result.run.id);
     else {
       setView('library');
-      setNotice(result.editing ? t('notice.agentUpdated') : t('notice.agentSaved'));
+      const touched = result.agent.updated_workflows ?? 0;
+      setNotice(touched ? t('wf.agentEditNotice', { count: touched }) : result.editing ? t('notice.agentUpdated') : t('notice.agentSaved'));
     }
     void refresh();
     void refreshFiles();
@@ -254,7 +262,7 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
               </section>
 
               <nav className="studio-navigation" aria-label={t('nav.label')}>
-                {([{ id: 'workspace', icon: 'graph', label: t('nav.workspace') }, { id: 'library', icon: 'layers', label: t('nav.library') }, { id: 'schedules', icon: 'calendar', label: t('nav.schedules') }] as const).map((item) => (
+                {([{ id: 'workspace', icon: 'graph', label: t('nav.workspace') }, { id: 'library', icon: 'layers', label: t('nav.library') }, { id: 'schedules', icon: 'calendar', label: t('nav.schedules') }, { id: 'workflows', icon: 'activity', label: t('nav.workflows') }, { id: 'knowledge', icon: 'file', label: t('nav.knowledge') }] as const).map((item) => (
                   <button key={item.id} className={view === item.id ? 'selected' : ''} aria-current={view === item.id ? 'page' : undefined} onClick={() => setView(item.id)}>
                     <Icon name={item.icon} size={16} />{item.label}{item.id === 'library' && <span>{agents.length}</span>}
                   </button>
@@ -296,7 +304,7 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
                                 <span>
                                   <time dateTime={item.created}>{date(item.created)}</time>
                                   <em>{item.mode === 'test' ? t('mode.testTag') : t('mode.liveTag')}</em>
-                                  {item.agent_id && <em className="studio-run-agent-tag">{t('run.agentTag')}</em>}
+                                  {item.workflow ? <em className="studio-run-agent-tag">{t('run.workflowTag')}</em> : item.agent_id && <em className="studio-run-agent-tag">{t('run.agentTag')}</em>}
                                 </span>
                               </span>
                             </button>
@@ -323,7 +331,13 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
                               <span className={'studio-badge ' + outcomeVisual(run.status, run.outcome_status)}><i className={'studio-run-dot ' + outcomeVisual(run.status, run.outcome_status)} />{runStatusLabel(run.status)}</span>
                               <span>{run.mode === 'test' ? t('mode.test') : run.model}</span>
                             </div>
-                            {run.agent_id && (
+                            {run.workflow && (
+                              <p className="studio-run-origin">
+                                <span>{t('run.workflowPart')} <strong>{run.workflow.name}</strong> · {run.workflow.node_label}</span>
+                                <button type="button" className="studio-button" onClick={() => { setWorkflowRun(run.workflow?.id ?? ''); setView('workflows'); }}>{t('run.openInWorkflow')}</button>
+                              </p>
+                            )}
+                            {run.agent_id && !run.workflow && (
                               <p className="studio-run-origin">
                                 <span>{t('run.partOfAgent')} <strong>{agents.find((agent) => agent.id === run.agent_id)?.name ?? run.agent_id.slice(0, 8)}</strong></span>
                                 {agents.some((agent) => agent.id === run.agent_id) && <button type="button" className="studio-button" onClick={() => setView('library')}>{t('run.openInLibrary')}</button>}
@@ -406,6 +420,13 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
                     )}
                   </section>
                 </div>
+              ) : view === 'workflows' ? (
+                <WorkflowPanel
+                  key={'wf-' + workflowRun} overview={workflows} agents={agents} timeZone={zone} initialRun={workflowRun || undefined}
+                  formatDate={date} onRefresh={() => api.workflows().then(setWorkflows).catch(() => undefined)} onOpenAgentRun={(id) => openRun(id)}
+                />
+              ) : view === 'knowledge' ? (
+                <KnowledgePanel formatDate={date} />
               ) : (
                 <AgentLibrary key={view} {...libraryProps} scheduled={view === 'schedules'} />
               )}

@@ -24,13 +24,24 @@ It is a development foundation, not a finished product (see [docs/ARCHITECTURE.m
   retries, and pauses after a rate-limited model call. Edits use optimistic revisions (409 on a stale one).
   Also: rerun a run as a new run (`POST /api/runs/{id}/rerun`), save a run's original settings as an agent
   (`POST /api/agents/from-run/{run_id}`), enable/pause a schedule (`POST /api/agents/{id}/enable`).
+- **Shared knowledge base** (`/api/memory`, tools `memory_read` / `memory_write`): versioned private text entries
+  (200 names, 12,000 characters each). Every write needs the exact current revision (409 on a stale one), deletes are
+  logical, the history is kept, and a replayed write is idempotent. Nothing is added to a prompt automatically and a
+  grant is never inherited.
+- **Workflows** (`/api/workflows`, `/api/workflow-runs`): graphs of saved agents (2-12 steps, at most 8 agents;
+  agent, condition, join and approval steps; no cycles). Each save is an immutable version that freezes the agents
+  it uses; editing a saved agent publishes a new workflow version in the same transaction. A run is an outer
+  LangGraph graph that never calls a model: every agent step is an ordinary agent run, so limits, metrics and the
+  business outcome apply. Starting needs consent for passing data between steps; schedules need recurring consent
+  and are tied to one version. No automatic retries; owner approval, cancel, continue and rerun are explicit.
 - Safety nets: a run stops after four failed tool results; every run gets a business outcome status
   (`success|noop|blocked|error|unknown`); JSON bodies are limited to 18,000 bytes and unknown fields are rejected.
 - `GET /api/status`: limits, scheduler heartbeat and an active rate-limit pause.
 - **Web UI ("Studio")** at `/`, taken over from the earlier dashboard-embedded implementation: runs with search and
   filters, the real LangGraph graph with an inspector and an event log, live messages (assistant-ui over the
   LangGraph SDK), report and statistics views, private run outputs, the agent library with templates, a weekly
-  schedule calendar, and the new-task/agent dialog. Dark and light theme, English and Hungarian, phone-friendly.
+  schedule calendar, the new-task/agent dialog, the knowledge base editor with history, and the workflow graph
+  editor with run view, approvals, schedules and version comparison. Dark and light theme, English and Hungarian, phone-friendly.
 - A LangGraph-SDK-compatible read API (the UI uses it).
 - Optional OAuth 2.0 (authorization code + PKCE) login, off by default.
 

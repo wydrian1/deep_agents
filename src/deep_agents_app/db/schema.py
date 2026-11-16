@@ -30,6 +30,8 @@ runs = Table(
     Column("agent_id", Text),  # saved agent that started this run (manual or scheduled)
     Column("scheduled_for", TIMESTAMP(timezone=True)),  # the occurrence a scheduled run was started for
     Column("rerun_of", Text),  # the run this one is a new-instance rerun of
+    Column("workflow_run_id", Text),  # set when this run is a workflow step's child run
+    Column("workflow_node_id", Text),
     Column("outcome_status", Text, nullable=False, server_default="unknown"),  # success|noop|blocked|error|unknown
     Column("event_count", Integer, nullable=False, server_default="0"),
     Column("event_bytes", BigInteger, nullable=False, server_default="0"),
@@ -128,4 +130,114 @@ artifacts = Table(
     Column("sha256", Text, nullable=False),
     Column("created", TIMESTAMP(timezone=True), nullable=False),
     Index("artifacts_run_id_created", "run_id", "created"),
+)
+
+# -- shared knowledge base ("memory"): current entries, immutable history, idempotency receipts --------------
+memory_entries = Table(
+    "memory_entries",
+    metadata,
+    Column("key", Text, primary_key=True),
+    Column("revision", Integer, nullable=False),
+    Column("value", Text, nullable=False),
+    Column("deleted", Boolean, nullable=False),
+    Column("updated", TIMESTAMP(timezone=True), nullable=False),
+    Column("writer", Text, nullable=False),
+)
+memory_versions = Table(
+    "memory_versions",
+    metadata,
+    Column("key", Text, primary_key=True),
+    Column("revision", Integer, primary_key=True),
+    Column("value", Text, nullable=False),
+    Column("deleted", Boolean, nullable=False),
+    Column("updated", TIMESTAMP(timezone=True), nullable=False),
+    Column("writer", Text, nullable=False),
+)
+memory_receipts = Table(
+    "memory_receipts",
+    metadata,
+    Column("actor", Text, primary_key=True),
+    Column("request_id", Text, primary_key=True),
+    Column("digest", Text, nullable=False),
+    Column("result", JSONB, nullable=False),
+)
+
+# -- workflows: immutable versions of a validated DAG of saved agents, and their durable runs ---------------
+workflows = Table(
+    "workflows",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("name", Text, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("deleted", Boolean, nullable=False, server_default="false"),
+    Column("created", TIMESTAMP(timezone=True), nullable=False),
+    Column("updated", TIMESTAMP(timezone=True), nullable=False),
+)
+workflow_versions = Table(
+    "workflow_versions",
+    metadata,
+    Column("workflow_id", Text, primary_key=True),
+    Column("version", Integer, primary_key=True),
+    Column("spec", JSONB, nullable=False),
+    Column("agents", JSONB, nullable=False),  # frozen {node id: {name, config}} snapshots
+    Column("created", TIMESTAMP(timezone=True), nullable=False),
+)
+workflow_runs = Table(
+    "workflow_runs",
+    metadata,
+    Column("id", Text, primary_key=True),
+    Column("workflow_id", Text, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("name", Text, nullable=False),
+    Column("spec", JSONB, nullable=False),
+    Column("agents", JSONB, nullable=False),
+    Column("input", Text, nullable=False),
+    Column("status", Text, nullable=False),  # running | completed | failed | cancelled
+    Column("created", TIMESTAMP(timezone=True), nullable=False),
+    Column("updated", TIMESTAMP(timezone=True), nullable=False),
+    Column("error", Text, nullable=False, server_default=""),  # message key
+    Column("heartbeat", TIMESTAMP(timezone=True)),
+    Column("lease", Text),
+    Column("lease_until", TIMESTAMP(timezone=True)),
+    Column("rerun_of", Text),
+    Column("outcome_status", Text, nullable=False, server_default="unknown"),
+    Column("scheduled_for", TIMESTAMP(timezone=True)),
+    Index("workflow_runs_status", "status"),
+)
+workflow_steps = Table(
+    "workflow_steps",
+    metadata,
+    Column("workflow_run_id", Text, primary_key=True),
+    Column("node_id", Text, primary_key=True),
+    Column("status", Text, nullable=False),
+    Column("child_id", Text),
+    Column("decision", Text, nullable=False, server_default="pending"),
+    Column("output", Text, nullable=False, server_default=""),
+    Column("selected", Text),
+    Column("waits", JSONB, nullable=False),
+    Column("updated", TIMESTAMP(timezone=True), nullable=False),
+)
+workflow_schedules = Table(
+    "workflow_schedules",
+    metadata,
+    Column("workflow_id", Text, primary_key=True),
+    Column("version", Integer, nullable=False),
+    Column("schedule", JSONB, nullable=False),
+    Column("input", Text, nullable=False, server_default=""),
+    Column("consents", JSONB, nullable=False),
+    Column("enabled", Boolean, nullable=False),
+    Column("next_run", TIMESTAMP(timezone=True)),
+    Column("last_run_id", Text),
+    Column("last_error", Text, nullable=False, server_default=""),  # message key
+    Column("created", TIMESTAMP(timezone=True), nullable=False),
+    Column("updated", TIMESTAMP(timezone=True), nullable=False),
+)
+workflow_diagnostics = Table(
+    "workflow_diagnostics",
+    metadata,
+    Column("id", BigInteger, primary_key=True, autoincrement=True),
+    Column("run_id", Text, nullable=False),
+    Column("phase", Text, nullable=False),
+    Column("created", TIMESTAMP(timezone=True), nullable=False),
+    Column("body", JSONB, nullable=False),
 )

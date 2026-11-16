@@ -4,7 +4,7 @@ import type { T } from './schedule';
 
 // Presentation of the tools offered by the backend catalog (GET /api/tools). Unknown tools get a generic icon.
 const ICONS: Record<string, IconName> = {
-  webfetch: 'globe', websearch: 'search', github: 'github', files: 'file', file_search: 'search', document: 'file', report: 'save',
+  webfetch: 'globe', websearch: 'search', github: 'github', files: 'file', file_search: 'search', document: 'file', report: 'save', memory_read: 'layers', memory_write: 'save',
 };
 export const toolIcon = (name: string): IconName => ICONS[name] ?? 'layers';
 

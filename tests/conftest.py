@@ -32,6 +32,7 @@ def make_settings(database_url: str, schema: str, data_dir, **overrides) -> Sett
         app_language="en",
         run_mode="thread",  # fast in-process runs; process mode has its own tests
         scheduler_enabled=False,  # tests drive scheduler.tick(now) explicitly
+        workflow_poll_seconds=0.05,  # workflow controllers poll quickly in tests
     )
     return Settings(_env_file=None, **{**values, **overrides})  # type: ignore[arg-type]
 

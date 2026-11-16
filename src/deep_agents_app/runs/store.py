@@ -48,12 +48,14 @@ class RunStore:
     def reserve_in(
         self, db: Any, *, prompt: str, model: str, mode: str, language: str, tools: list[str], files: list[str],
         agent_id: str | None = None, scheduled_for: datetime | None = None, rerun_of: str | None = None,
+        workflow_run_id: str | None = None, workflow_node_id: str | None = None, created: datetime | None = None,
     ) -> str:
         """Insert a running run inside the caller's transaction, respecting MAX_CONCURRENT_RUNS across replicas.
 
         The advisory lock lives until that transaction ends, so slot counting stays atomic.
         """
-        run_id, created = str(uuid.uuid4()), now()
+        # A workflow step inherits its workflow's absolute deadline by passing the workflow's ``created`` time.
+        run_id, created = str(uuid.uuid4()), created or now()
         self.settings.data_dir.mkdir(parents=True, exist_ok=True)
         if shutil.disk_usage(self.settings.data_dir).free < self.settings.min_free_disk_mb * 1024 * 1024:
             raise DiskLow
@@ -66,7 +68,8 @@ class RunStore:
             insert(runs).values(
                 id=run_id, prompt=prompt, model=model, mode=mode, language=language, status=ACTIVE,
                 tools=tools, files=files, messages=[], agent_id=agent_id, scheduled_for=scheduled_for,
-                rerun_of=rerun_of, created=created, updated=created,
+                rerun_of=rerun_of, workflow_run_id=workflow_run_id, workflow_node_id=workflow_node_id,
+                created=created, updated=now(),
             )
         )
         return run_id
@@ -114,7 +117,8 @@ class RunStore:
                     select(
                         runs.c.id, runs.c.prompt, runs.c.model, runs.c.mode, runs.c.status, runs.c.language,
                         runs.c.tools, runs.c.steps, runs.c.error, runs.c.outcome_status, runs.c.agent_id,
-                        runs.c.scheduled_for, runs.c.rerun_of, runs.c.created, runs.c.updated,
+                        runs.c.scheduled_for, runs.c.rerun_of, runs.c.workflow_run_id, runs.c.workflow_node_id,
+                        runs.c.created, runs.c.updated,
                     )
                     .order_by((runs.c.status == ACTIVE).desc(), runs.c.created.desc())
                     .limit(limit)

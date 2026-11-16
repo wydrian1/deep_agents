@@ -38,9 +38,16 @@ describe('dictionaries', () => {
       ...['running', 'completed', 'failed', 'cancelled'].map((v) => 'run.status.' + v),
       ...['research', 'repo', 'documents'].flatMap((id) => ['name', 'summary', 'prompt'].map((f) => `templates.${id}.${f}`)),
       'tool.readOnly', 'tool.privateWrite',
-      ...['webfetch', 'websearch', 'github', 'files', 'file_search', 'document', 'report'].flatMap((id) => ['label', 'description'].map((f) => `tools.${id}.${f}`)),
+      ...['webfetch', 'websearch', 'github', 'files', 'file_search', 'document', 'report', 'memory_read', 'memory_write'].flatMap((id) => ['label', 'description'].map((f) => `tools.${id}.${f}`)),
+      ...['kind', 'label', 'agentId', 'operator', 'value', 'name', 'mode', 'tools', 'prompt'].map((v) => 'wf.diff.field.' + v),
+      ...['start', 'end', 'agent', 'condition', 'join', 'approval'].flatMap((v) => ['wf.node.' + v, 'wf.kind.' + v]),
+      ...['contains', 'not_contains', 'empty', 'nonempty'].map((v) => 'wf.op.' + v),
+      ...['running', 'completed', 'failed', 'cancelled'].map((v) => 'wf.status.' + v),
+      ...['pending', 'running', 'completed', 'failed', 'skipped', 'uncertain', 'approval', 'capacity', 'launching'].map((v) => 'wf.step.' + v),
+      ...['missingNode', 'fromEnd', 'toStart', 'self', 'duplicateEdge', 'edgeLimit', 'pickBranch', 'branchTaken', 'branchOnlyCondition', 'cycle'].map((v) => 'wf.err.' + v),
+      ...['name', 'nameLong', 'duplicate', 'tooManyNodes', 'tooManyAgents', 'noAgent', 'noCondition', 'noIncoming', 'noOutgoing', 'branches'].map((v) => 'wf.problem.' + v),
     ];
-    const prefixes = ['node.', 'outcome.', 'run.status.', 'stats.share.', 'weekday.', 'weekdayShort.'];
+    const prefixes = ['node.', 'outcome.', 'run.status.', 'stats.share.', 'weekday.', 'weekdayShort.', 'wf.node.', 'wf.kind.', 'wf.op.', 'wf.status.', 'wf.step.', 'wf.diff.field.'];
     const missing = [...used, ...dynamic].filter((key) => !prefixes.includes(key) && !(key in en));
     expect(missing).toEqual([]);
   });
