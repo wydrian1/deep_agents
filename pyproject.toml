@@ -37,7 +37,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-deep_agents_app = ["prompts/*.md", "messages/*.json", "static/*", "migrations/script.py.mako"]
+deep_agents_app = ["prompts/*.md", "messages/*.json", "static/app/*", "static/app/assets/*", "migrations/script.py.mako"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -21,6 +21,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from ..auth import current_principal
 from ..i18n import message
 from ..runs.store import ACTIVE, RunStore
+from .graph_view import studio_graph
 from .routes import public_error
 
 _UUID = re.compile(r"^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$")
@@ -93,6 +94,16 @@ def router() -> APIRouter:
     def state(run_id: str, request: Request) -> JSONResponse:
         checked(run_id, request)
         return JSONResponse(thread_state(request.app.state.store, run_id), headers=NO_STORE)
+
+    @api.get("/threads/{run_id}/graph")
+    def graph(run_id: str, request: Request, after: int = 0) -> JSONResponse:
+        """The run's real LangGraph topology and normalized step events after a cursor (for the Studio view)."""
+        checked(run_id, request)
+        try:
+            result = studio_graph(request.app.state.store, run_id, after)
+        except ValueError:
+            raise HTTPException(400, "invalid event cursor") from None
+        return JSONResponse(result, headers=NO_STORE)
 
     @api.get("/threads/{run_id}/runs/{same_id}/stream")
     async def join(run_id: str, same_id: str, request: Request) -> StreamingResponse:
