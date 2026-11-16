@@ -374,6 +374,24 @@ class WorkflowStore:
             raise WorkflowRejected("wf_approval_inactive")
         return True
 
+    def orphaned_runs(self, claim_grace_seconds: int = 60) -> list[str]:
+        """Running workflows whose controller is gone: the lease expired, or no controller ever took it.
+
+        A live controller (on any replica) heartbeats well inside ``LEASE_SECONDS``, so an expired lease means no
+        controller is working on the run. The caller resumes them from their checkpoint (no new workflow).
+        """
+        moment = now()
+        deadline = moment - timedelta(seconds=self.settings.run_timeout_seconds)
+        unclaimed = moment - timedelta(seconds=claim_grace_seconds)
+        with self.engine.connect() as db:
+            rows = db.execute(
+                select(workflow_runs.c.id).where(
+                    workflow_runs.c.status == "running", workflow_runs.c.created > deadline,
+                    (workflow_runs.c.lease_until < moment) | (workflow_runs.c.lease_until.is_(None) & (workflow_runs.c.created < unclaimed)),
+                ).order_by(workflow_runs.c.created).limit(10)
+            )
+            return [r[0] for r in rows]
+
     def can_continue(self, run_id: str) -> bool:
         """The controller may be relaunched only after its lease expired (no parallel controller)."""
         with self.engine.connect() as db:

@@ -12,6 +12,7 @@ from ..auth import current_principal
 from ..i18n import message
 from ..runs.store import DiskLow
 from ..saved.schedule import Schedule
+from ..workflows.diagnostics import list_reports
 from ..workflows.engine import ControllerPool
 from ..workflows.spec import WorkflowRejected, valid_uuid
 from ..workflows.store import (
@@ -116,6 +117,11 @@ def router() -> APIRouter:
             "max_nodes": 12, "max_agent_nodes": 8, "max_active_workflows": MAX_ACTIVE_WORKFLOWS, "max_stored_runs": MAX_STORED_RUNS,
             "max_agent_prompt": MAX_AGENT_PROMPT, "timeout_seconds": request.app.state.settings.run_timeout_seconds,
         }
+
+    @api.get("/workflow-diagnostics")
+    def diagnostics(request: Request) -> dict[str, Any]:
+        """Content-free controller failure reports (error classes and code locations only), newest first."""
+        return {"reports": list_reports(store_of(request).engine)}
 
     @api.post("/workflows")
     def save(body: SaveBody, request: Request) -> dict[str, Any]:

@@ -3,6 +3,7 @@ import { api, ApiError } from './api';
 import AgentLibrary from './components/AgentLibrary';
 import Composer, { type ComposerHandle, type ComposerResult } from './components/Composer';
 import Icon from './components/Icon';
+import DailySummaryView from './components/DailySummary';
 import KnowledgePanel from './components/KnowledgePanel';
 import WorkflowPanel from './components/WorkflowPanel';
 import RunArtifacts from './components/RunArtifacts';
@@ -21,7 +22,7 @@ import type { Agent, Run, ServiceStatus, ToolInfo, UploadedFile, WorkflowOvervie
 // The live thread pulls in assistant-ui and the LangGraph SDK (most of the bundle): load it on demand.
 const LiveThread = lazy(() => import('./components/LiveThread'));
 
-type View = 'workspace' | 'library' | 'schedules' | 'knowledge' | 'workflows';
+type View = 'workspace' | 'library' | 'schedules' | 'knowledge' | 'workflows' | 'summary';
 type Pane = 'graph' | 'conversation' | 'events';
 type Snapshot = { runs: Run[]; agents: Agent[]; status: ServiceStatus };
 
@@ -262,7 +263,7 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
               </section>
 
               <nav className="studio-navigation" aria-label={t('nav.label')}>
-                {([{ id: 'workspace', icon: 'graph', label: t('nav.workspace') }, { id: 'library', icon: 'layers', label: t('nav.library') }, { id: 'schedules', icon: 'calendar', label: t('nav.schedules') }, { id: 'workflows', icon: 'activity', label: t('nav.workflows') }, { id: 'knowledge', icon: 'file', label: t('nav.knowledge') }] as const).map((item) => (
+                {([{ id: 'workspace', icon: 'graph', label: t('nav.workspace') }, { id: 'library', icon: 'layers', label: t('nav.library') }, { id: 'schedules', icon: 'calendar', label: t('nav.schedules') }, { id: 'workflows', icon: 'activity', label: t('nav.workflows') }, { id: 'knowledge', icon: 'file', label: t('nav.knowledge') }, { id: 'summary', icon: 'bell', label: t('nav.summary') }] as const).map((item) => (
                   <button key={item.id} className={view === item.id ? 'selected' : ''} aria-current={view === item.id ? 'page' : undefined} onClick={() => setView(item.id)}>
                     <Icon name={item.icon} size={16} />{item.label}{item.id === 'library' && <span>{agents.length}</span>}
                   </button>
@@ -425,6 +426,8 @@ export default function App({ onLanguage }: { onLanguage: (language: string | un
                   key={'wf-' + workflowRun} overview={workflows} agents={agents} timeZone={zone} initialRun={workflowRun || undefined}
                   formatDate={date} onRefresh={() => api.workflows().then(setWorkflows).catch(() => undefined)} onOpenAgentRun={(id) => openRun(id)}
                 />
+              ) : view === 'summary' ? (
+                <DailySummaryView formatDate={date} onOpenWorkflowRun={(id) => { setWorkflowRun(id); setView('workflows'); }} />
               ) : view === 'knowledge' ? (
                 <KnowledgePanel formatDate={date} />
               ) : (

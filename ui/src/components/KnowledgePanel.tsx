@@ -80,8 +80,8 @@ export default function KnowledgePanel({ formatDate }: Props) {
     setNotice('');
     try {
       await api.memoryPut(key, value, expected, requestId.current);
-      setNotice(t('kb.saved'));
       await Promise.all([open(key), loadList()]);
+      setNotice(t('kb.saved')); // after open(), which clears the notices of the previously shown entry
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409) setConflict(reason.current_revision);
       fail(reason);
@@ -96,8 +96,8 @@ export default function KnowledgePanel({ formatDate }: Props) {
     setError('');
     try {
       await api.memoryDelete(selected.key, selected.revision, newRequestId());
-      setNotice(t('kb.deletedNotice'));
       await Promise.all([open(selected.key), loadList()]);
+      setNotice(t('kb.deletedNotice'));
     } catch (reason) {
       if (reason instanceof ApiError && reason.status === 409) setConflict(reason.current_revision);
       fail(reason);

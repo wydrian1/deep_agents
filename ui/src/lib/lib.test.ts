@@ -8,6 +8,8 @@ import { outcomeBlocked, outcomeVisual } from './outcome';
 import { clock, nextScheduledRun, runsOnWeekday, scheduleLabel, scheduleSummary, scheduleTime } from './schedule';
 import { toggleTool } from './tools';
 
+import { summaryFigures, type DailySummary } from './summary';
+
 const hu = (key: string, values?: Record<string, string | number>) => translate('hu', key, values);
 const en = (key: string, values?: Record<string, string | number>) => translate('en', key, values);
 
@@ -150,5 +152,19 @@ describe('format helpers', () => {
     expect(runTitle('\n  \nHello world\nsecond', en)).toBe('Hello world');
     expect(runTitle('x'.repeat(200), en)).toHaveLength(90);
     expect(runTitle('   ', en)).toBe('Untitled task');
+  });
+});
+
+describe('daily summary figures', () => {
+  const summary: DailySummary = {
+    since: '2026-11-16T00:00:00+00:00', now: '2026-11-16T10:00:00+00:00',
+    agents: { total: 5, by_status: { completed: 3, failed: 1, running: 1 }, by_outcome: { success: 2, blocked: 1 } },
+    workflows: { total: 6, by_status: { completed: 3, failed: 1, running: 1, cancelled: 1 }, by_outcome: {}, problem_count: 1, problems: [] },
+    tokens: { calls: 10, input: 1000, output: 200, cache: 250, error_calls: 1, cache_rate: 0.25 },
+    limit: { rate_limited_calls: 0, paused_until: null },
+  };
+  it('splits fine, stuck and running without counting cancelled workflows as fine', () => {
+    expect(summaryFigures(summary)).toEqual({ flowOk: 3, flowStopped: 1, flowRunning: 1, agentsOk: 2, agentsStopped: 2, agentsRunning: 1, cachePercent: 25 });
+    expect(summaryFigures({ ...summary, tokens: { ...summary.tokens, cache_rate: null } }).cachePercent).toBeNull();
   });
 });

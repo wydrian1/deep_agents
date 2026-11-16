@@ -5,7 +5,8 @@ exceptions of the cause/context chain (class name from an allow-list, otherwise 
 twenty stack locations per exception (only file and function names of THIS package; every external or dynamic
 frame is anonymous). Never the exception message, ``str``/``repr``, source lines, variables, prompts, mail, tokens
 or absolute paths. At most 200 reports, one per run, never pruned automatically. Best effort: a failure here can
-never replace the workflow's own safe failure/cancellation. There is deliberately no HTTP endpoint or agent tool.
+never replace the workflow's own safe failure/cancellation. The owner can read the reports (they hold metadata
+only) through ``GET /api/workflow-diagnostics``; there is deliberately no agent tool.
 """
 
 from __future__ import annotations
@@ -94,6 +95,13 @@ def exception_metadata(error: BaseException | None) -> list[dict[str, Any]]:
         chain.append(item)
         error = error.__cause__ if error.__cause__ is not None else (None if error.__suppress_context__ else error.__context__)
     return chain
+
+
+def list_reports(engine: Engine, limit: int = MAX_REPORTS) -> list[dict[str, Any]]:
+    """Newest first. The bodies are metadata only (see the module docstring)."""
+    with engine.connect() as db:
+        rows = db.execute(select(workflow_diagnostics).order_by(workflow_diagnostics.c.created.desc()).limit(min(limit, MAX_REPORTS))).mappings()
+        return [{"run_id": r["run_id"], "phase": r["phase"], "created": r["created"].isoformat(), "body": r["body"]} for r in rows]
 
 
 def record_failure(engine: Engine, run_id: str, phase: str, error: BaseException) -> bool:

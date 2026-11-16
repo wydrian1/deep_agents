@@ -13,6 +13,18 @@ from .store import WorkflowStore
 log = logging.getLogger(__name__)
 
 
+def resume_orphans(store: WorkflowStore, pool: ControllerPool) -> list[str]:
+    """Relaunch controllers whose lease expired (the previous one died). Same checkpoint, same children."""
+    resumed: list[str] = []
+    for run_id in store.orphaned_runs():
+        try:
+            pool.launch(run_id)
+            resumed.append(run_id)
+        except Exception as problem:
+            log.warning("workflow resume failed: %s", type(problem).__name__)
+    return resumed
+
+
 def run_due_workflows(store: WorkflowStore, pool: ControllerPool, moment: datetime | None = None) -> list[str]:
     """Claim due occurrences (committed together with their advancement), then start them. Never retried."""
     moment = (moment or datetime.now(UTC)).astimezone(UTC)

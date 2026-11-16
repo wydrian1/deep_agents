@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # Per-worker address-space limit in MB (POSIX only, 0 = off). Leave off unless you have measured it;
     # prefer container limits (mem_limit/pids_limit) for the whole service.
     worker_memory_mb: int = 0
+    # Per-worker limits (POSIX only, 0 = off): largest file a worker may write (MB) and open descriptors.
+    worker_file_mb: int = 512
+    worker_open_files: int = 1024
     # Scheduler for saved agents. Safe with several replicas (rows are claimed with SKIP LOCKED).
     scheduler_enabled: bool = True
     scheduler_interval_seconds: int = 30
@@ -59,6 +62,8 @@ class Settings(BaseSettings):
     rate_limit_cooldown_seconds: int = 3600
     # How often a workflow controller checks its checkpoint and child runs (seconds).
     workflow_poll_seconds: float = 1.0
+    # The scheduler tick relaunches workflow controllers whose lease expired (they resume from the checkpoint).
+    workflow_auto_resume: bool = True
 
     # Optional OAuth 2.0 / OIDC login. OFF by default: with AUTH_ENABLED=false the service
     # has no login and no access protection at all (see auth/__init__.py).
@@ -154,7 +159,7 @@ class Settings(BaseSettings):
             raise ValueError("must be at least 1")
         return value
 
-    @field_validator("worker_memory_mb", "rate_limit_cooldown_seconds")
+    @field_validator("worker_memory_mb", "worker_file_mb", "worker_open_files", "rate_limit_cooldown_seconds")
     @classmethod
     def _memory(cls, value: int) -> int:
         if value < 0:

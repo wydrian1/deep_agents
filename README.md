@@ -34,6 +34,14 @@ It is a development foundation, not a finished product (see [docs/ARCHITECTURE.m
   LangGraph graph that never calls a model: every agent step is an ordinary agent run, so limits, metrics and the
   business outcome apply. Starting needs consent for passing data between steps; schedules need recurring consent
   and are tied to one version. No automatic retries; owner approval, cancel, continue and rerun are explicit.
+- **Daily summary** (`GET /api/summary`, "Today" view): counts, outcomes, stuck workflows with the agent's own stated
+  reason, token totals and an active rate-limit pause for the current day in `SCHEDULE_TIMEZONE`. Never prompts,
+  results or tool data. Controller failure reports (error classes and code locations only) are at
+  `GET /api/workflow-diagnostics`.
+- **Worker isolation**: each run's worker gets an allow-listed environment without the login secrets, a private
+  scratch directory, resource limits, no core dumps and no-new-privileges; the compose file runs the container
+  read-only with dropped capabilities. It is hardening, not a sandbox: see
+  [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md#isolation).
 - Safety nets: a run stops after four failed tool results; every run gets a business outcome status
   (`success|noop|blocked|error|unknown`); JSON bodies are limited to 18,000 bytes and unknown fields are rejected.
 - `GET /api/status`: limits, scheduler heartbeat and an active rate-limit pause.
@@ -77,7 +85,7 @@ All settings are environment variables; see [.env.example](.env.example) for the
 | Database | `DATABASE_URL`, `DATABASE_SCHEMA`, `AUTO_MIGRATE` |
 | Gateway | `LLM_GATEWAY_URL`, `LLM_API_KEY`, `DEFAULT_MODEL`, `LLM_PARAMS_JSON`, `LLM_TIMEOUT_SECONDS`, `LLM_MAX_RETRIES` |
 | Behaviour | `APP_LANGUAGE`, `DATA_DIR`, `MAX_CONCURRENT_RUNS`, `RUN_TIMEOUT_SECONDS`, `ALLOW_TEST_MODE`, `WEB_BLOCKED_HOSTS` |
-| Execution | `RUN_MODE` (`process` default, `thread` for tests), `WORKER_MEMORY_MB` |
+| Execution | `RUN_MODE` (`process` default, `thread` for tests), `WORKER_MEMORY_MB`, `WORKER_FILE_MB`, `WORKER_OPEN_FILES`, `WORKFLOW_AUTO_RESUME` |
 | OAuth login (off) | `AUTH_ENABLED`, `OAUTH_*`, `SESSION_SECRET`, `COOKIE_SECURE` |
 
 ### Enabling the OAuth login later
@@ -98,6 +106,15 @@ npm ci
 npm run dev          # http://localhost:5173, proxies /api and /auth to http://127.0.0.1:8000
 npm run typecheck && npm test
 npm run build        # writes the production bundle into src/deep_agents_app/static/app (served at "/")
+```
+
+Browser tests (Playwright) drive a running service with test-mode agents, so no gateway is needed:
+
+```bash
+# terminal 1: DATABASE_URL=... ALLOW_TEST_MODE=true uvicorn deep_agents_app.main:app --port 8000
+cd ui
+npx playwright install chromium
+npm run e2e          # E2E_BASE_URL defaults to http://127.0.0.1:8000
 ```
 
 Without a build, `/` shows a short notice and the API stays available at `/api/docs`.
